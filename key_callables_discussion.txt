@@ -1,6 +1,10 @@
 ## Key callables, Tasks 1 to 36
 
-This discussion covers the 36 final task orchestrators of `feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression_draft.ipynb`, in notebook task order. Thirty-two are named `run_task_1` to `run_task_36`; the orchestrators of Tasks 17, 22, 25 and 27 are `terminal_fit_task_17`, `run_gnrpa_task_22`, `run_task_25_baselines` and `run_lasso_sparsity_stress_task_27`. Python implementation author: **CS Chirinda**. The orchestrators' signatures and documented contracts, the docstrings of the stage callables they compose, and the notebook's declared constants establish behaviour; the paper establishes the methodological standard. Internal helpers are accounted for inside their parent task rather than counted as additional callables. The notebook was not executed for this document.
+This discussion covers the 36 final task orchestrators of `feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression_draft.ipynb`, in notebook task order. Thirty-two are named `run_task_1` to `run_task_36`; the orchestrators of Tasks 17, 22, 25 and 27 are `terminal_fit_task_17`, `run_gnrpa_task_22`, `run_task_25_baselines` and `run_lasso_sparsity_stress_task_27`. 
+
+Python implementation author: **CS Chirinda**. 
+
+The orchestrators' signatures and documented contracts, the docstrings of the stage callables they compose, and the notebook's declared constants establish behaviour; the paper establishes the methodological standard. Internal helpers are accounted for inside their parent task rather than counted as additional callables. The notebook was not executed for this document.
 
 Notation: session $t$, adjusted NASDAQ-100 close $P_t$, feature set $\mathcal{F}=\lbrace f_1,\dots,f_p\rbrace$, subset $S$, state $s_t=(f_{\mathrm{last}},S_t)$, policy table $W$, heuristic bias $\beta$, temperature $\tau$, and $M$ ensemble runs. Paper equations are numbered as in `latex_context.txt`: (1) softmax policy; (2) policy update; (3) target; (4) $L_0$ problem; (5) action set; (6) stabilized OLS; (7) redundancy; (8) feature bias; (9) stopping bias; (10) lexicographic reward; (11) MaxVIF; (12) ensemble linearity.
 
@@ -326,7 +330,7 @@ $$
 - **Inputs**: `state`, `policy`, `config`, `rollout_fn`; optional `iteration_log`.
 - **Process**: resolves and validates the Table 2 triple, patience, learning rates and temperature in a private configuration copy, enters the recursion at $L_{\mathrm{top}}=3$, and checks the return signature.
 - **Outputs**: a tuple of the best sequence, a list of (state, action) pairs, and the length-three lexicographic reward.
-- **Transformation**: a root state and the shared table become the best trajectory; deeper levels filter trajectories before any update.
+- **Transformation**: a root state and the policy table become the best trajectory; deeper levels filter trajectories before any update.
 - **Research role**: implements Algorithm 1, GNRPA with endogenous stopping.
 - **Equations**: at each level $L\ge1$, with the update of Equation (2) applied toward the retained best sequence:
 
@@ -334,7 +338,7 @@ $$
 (\mathrm{seq},\mathrm{score})\leftarrow\mathrm{GNRPA}(L-1,s,W),\qquad \text{break if}\ (L=1\wedge\mathrm{no\_improve}\ge P)\ \text{or}\ (L>1\wedge n\ge I_L).
 $$
 
-- **Implementation distinction**: the table is updated in place and shared across levels. The wrapper draws no random variates, so the injected rollout is the only stochastic component.
+- **Implementation distinction**: each level updates its own table in place and gives each child level a copy, as Algorithm 1 passes the policy by value; a rollout only reads the table. The wrapper draws no random variates, so the injected rollout is the only stochastic component.
 
 ### Task 23 — `run_task_23`
 
