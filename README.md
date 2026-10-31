@@ -60,7 +60,7 @@ The reference is an arXiv preprint with a conference affiliation, not a journal 
 
 The project implements an automated, validation-guided model-discovery system. Given a high-dimensional and heavily collinear set of candidate variables, it searches combinatorially over subsets under a lexicographic objective: explanatory accuracy first, then sparsity, then multicollinearity. It can decide its own model complexity. The result is a compact, unshrunk linear explanation of a target, and its additive attribution survives ensembling, so the model can be read and audited coefficient by coefficient.
 
-> **Reproduction status.** The pipeline runs end to end on real market, macroeconomic and factor data, in all three configurations of the paper. It does **not** fully reproduce the paper's results. The fixed-cardinality ensemble lands within 0.003 of the paper's out-of-sample $R^2$, the endogenous ensemble within 0.024, and the tuned ensemble 0.06 short. Per-run accuracy is 0.06 to 0.08 below the paper. The leading cause is the feature universe: the manuscript does not disclose 403 of its 1,072 features, so this implementation has 877. See [Methodology Implemented](#methodology-implemented) for the numbers.
+> **Reproduction status.** The pipeline runs end to end on real market, macroeconomic and factor data, in all three configurations of the paper. It does **not** fully reproduce the paper's results. All three ensembles land within 0.024 of the paper's out-of-sample $R^2$: tuned 0.012 short, endogenous 0.017 short and fixed 0.024 short. Per-run accuracy is 0.03 to 0.16 below the paper, and one fixed-cardinality run fails badly. The leading explanation of the remaining gap is the feature universe: the manuscript does not disclose 403 of its 1,072 features, so this implementation has 877. See [Methodology Implemented](#methodology-implemented) for the numbers.
 
 ## Table of Contents
 
@@ -218,21 +218,20 @@ The diagram below illustrates the Inputs, Processes and Outputs (IPOs) of the im
 
 ### Results on the real panels
 
-These figures come from full-mode runs on real Yahoo Finance, FRED and factor-library data, with the Table 2 hyperparameters and Table 3 run counts. Optuna was not re-run. The paper's numbers are comparison targets. The raw data, run folders and helper scripts behind these figures are not published, for privacy and data-licensing reasons, so the figures cannot be re-derived from this repository alone.
+These figures come from full-mode runs on real Yahoo Finance, FRED and factor-library data, with the Table 2 hyperparameters and Table 3 run counts. They were produced on 2026-10-31 after a correction to the nested search, described under **Why**. Optuna was not re-run. The paper's numbers are comparison targets. The raw data, run folders and helper scripts behind these figures are not published, for privacy and data-licensing reasons, so the figures cannot be re-derived from this repository alone.
 
 | Quantity | Fixed ($K = 60$) | Tuned ($K = 15$) | Endogenous |
 | --- | --- | --- | --- |
 | Per-run OOS $R^2$, paper | 0.643 ± 0.030 | 0.665 ± 0.039 | 0.668 ± 0.009 |
-| Per-run OOS $R^2$, pipeline | 0.584 ± 0.076 | 0.590 ± 0.053 | 0.610 ± 0.065 |
+| Per-run OOS $R^2$, pipeline | 0.480 ± 0.337 | 0.637 ± 0.046 | 0.614 ± 0.074 |
 | **Ensemble OOS $R^2$, paper** | **0.6855** | **0.6908** | **0.6961** |
-| **Ensemble OOS $R^2$, pipeline** | **0.6823** | **0.6306** | **0.6723** |
+| **Ensemble OOS $R^2$, pipeline** | **0.6614** | **0.6789** | **0.6793** |
 | Validation $R^2$, paper | 0.702 | 0.723 | 0.755 |
-| Validation $R^2$, pipeline | 0.769 | 0.712 | 0.798 |
+| Validation $R^2$, pipeline | 0.769 | 0.752 | 0.789 |
 | Mean subset size, paper | 60 | 15 | 18.6 |
-| Mean subset size, pipeline | 60 | 15 | 32.9 |
+| Mean subset size, pipeline | 60 | 15 | 29.5 |
 | Global features, paper | 341 | 74 | 59 |
-| Global features, pipeline | 429 | 144 | 198 |
-| Pipeline run time (s) | 3,839 | 5,161 | 22,813 |
+| Global features, pipeline | 445 | 116 | 183 |
 
 | Baseline | Paper OOS $R^2$ | Pipeline OOS $R^2$ | Features, paper / pipeline |
 | --- | --- | --- | --- |
@@ -241,11 +240,15 @@ These figures come from full-mode runs on real Yahoo Finance, FRED and factor-li
 | Elastic Net | 0.6243 | 0.581 | 55 / 11 |
 | Greedy $L_0$ | 0.2489 | 0.552 | 5 / 3 |
 
-**What reproduces.** The per-run ordering of the configurations, the fixed ensemble within 0.003, the endogenous ensemble within 0.024, all Table 2 hyperparameters as inputs, the rollout budgets, and the leakage audit.
+The three configurations took about six hours together, sharing seven workers, so no per-configuration run time is reported.
 
-**What does not reproduce.** Per-run accuracy, per-run dispersion, the agreement across runs, the endogenous subset size, the tuned ensemble, and every baseline. On these panels the MCTS per-run mean does not beat the paper's Lasso figure. Task 36 returns `overall_pass = False`, with leakage passing.
+**What reproduces.** The ordering of the ensembles, although endogenous and tuned differ by only 0.0004, all three ensembles within 0.024, all Table 2 hyperparameters as inputs, the rollout budgets, and the leakage audit.
 
-**Why.** The evidence points to the feature universe. An ablation that removed the 170 reconstructed `diff_mean` and `diff_std` columns ($p = 707$) brought back more of the paper's named Table 4 features but destroyed accuracy, with Lasso falling from 0.58 to 0.09. Neither universe is the paper's, and the manuscript does not allow it to be rebuilt. Closing the gap needs the authors' feature list or code.
+**What does not reproduce.** Per-run accuracy, per-run dispersion, the per-run ordering (tuned leads here, endogenous in the paper), the agreement across runs, the endogenous subset size, and every baseline. Only the tuned per-run mean beats the paper's Lasso figure. The fixed per-run mean is pulled down by one run at $-0.786$; its median is 0.592. That run relies on Nasdaq-100 level terms whose test-window values are about three times their training mean, and its unshrunk coefficients extrapolate badly. Task 36 returns `overall_pass = False`, with leakage passing.
+
+**Why.** The earlier version shared one policy table across nesting levels, whereas Algorithm 1 passes it by value. Correcting this, on the same seeds, raised the tuned ensemble from 0.6306 to 0.6789 (per-run change +0.047, 15 of 18 seeds better, Wilcoxon $p = 0.008$). The endogenous ensemble moved from 0.6723 to 0.6793 (per-run change +0.005, $p = 0.79$). The fixed ensemble fell from 0.6823 to 0.6614 (per-run change $-0.104$, 7 of 18 seeds better, $p = 0.14$), so the earlier 0.003 match came from the defective search.
+
+The remaining gap points to the feature universe. An ablation, run before this correction, removed the 170 reconstructed `diff_mean` and `diff_std` columns ($p = 707$). It brought back more of the paper's named Table 4 features but destroyed accuracy, with Lasso falling from 0.58 to 0.09. Neither universe is the paper's, and the manuscript does not allow it to be rebuilt. Closing the gap needs the authors' feature list or code.
 
 **Known departures from the paper.**
 
@@ -256,6 +259,7 @@ These figures come from full-mode runs on real Yahoo Finance, FRED and factor-li
 | Test sessions | 562 | 563 |
 | OHLC indicators | not stated | close and volume only, so 13 indicator families use close-only proxies |
 | Terminal model intercept | not stated | none, as Equation (6) is written |
+| Rates and spreads | kept at date $t$ | `rate_short`, `rate_long`, `spread_2s10s` and `spread_hy` lagged one session; on the paper's 15 features, removing the lag raises OOS $R^2$ from 0.674 to 0.692 |
 | Optuna | 15, 50 and 20 trials | implemented, not re-run; Table 2 values used |
 | Task 35 sensitivity | not applicable | implemented, not run |
 
@@ -1965,7 +1969,7 @@ Smoke mode does not return `prepared`, so the first bundle must come from a full
 
 #### **Step 4.5: The study-scale call (not executed here)**
 
-With every default in place, the call below is the study run: Table 3's run counts and the frozen Table 2 vectors. It was **not** executed on these synthetic panels. On the real panels, the pipeline took 3,839 seconds for `fixed`, 5,161 seconds for `tuned` and 22,813 seconds for `endogenous`.
+With every default in place, the call below is the study run: Table 3's run counts and the frozen Table 2 vectors. It was **not** executed on these synthetic panels. On the real panels, before the 2026-10-31 search correction, the pipeline took 3,839 seconds for `fixed`, 5,161 seconds for `tuned` and 22,813 seconds for `endogenous`.
 
 ```python
 # Not executed in the verification: this is the study-scale call.
