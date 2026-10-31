@@ -1,0 +1,1573 @@
+{
+  "study_meta": {
+    "title": "L0 Feature Selection via Monte Carlo Tree Search in High-Dimensional Financial Regression",
+    "authors": [
+      "Cameron Mouangue",
+      "Tristan Cazenave"
+    ],
+    "affiliation": "LAMSADE, Université Paris Dauphine-PSL, CNRS",
+    "author_email_1": "cameron.mouangue@polytechnique.edu",
+    "author_email_2": "tristan.cazenave@lamsade.dauphine.fr",
+    "venue": "ACM International Conference on AI in Finance (ICAIF '26)",
+    "venue_dates": "November 14--17, 2026",
+    "venue_location": "Milan, Italy",
+    "acm_year": 2026,
+    "document_class": "acmart[sigconf]",
+    "keywords": [
+      "Monte Carlo Tree Search",
+      "Feature Selection",
+      "Quantitative Finance",
+      "Reinforcement Learning",
+      "Combinatorial Optimization"
+    ],
+    "ccs_concepts": [
+      "Computing methodologies~Reinforcement learning",
+      "Applied computing~Economics"
+    ],
+    "code_repository_url": null,
+    "dataset_download_url": null,
+    "data_availability_statement": null
+  },
+  "interpretive_contract": {
+    "task_type": "contemporaneous explanatory regression",
+    "task_target": "weekly NASDAQ-100 return (5-day rolling sum)",
+    "task_statement": "explaining, rather than forecasting, the weekly NASDAQ-100 return",
+    "R2_interpretation": "explanatory, not predictive",
+    "economic_mechanism_cited": "leverage effect (Black, 1976)",
+    "contemporaneous_alignment_rationale": "Y_t aggregates 5 days while some predictors are 1-day changes; model captures same-day and near-term co-movement — deliberate, not oversight",
+    "regime_adjacency_tradeoff": "Validation window placed immediately before test to maximize regime similarity; trades weaker protection against regime change",
+    "optimizer_curse_explanation": "CV-to-test gap (up to 0.7607 CV vs. 0.643-0.668 true test) is the expected signature of argmax selection over noisy trials; not leakage",
+    "headline_R2_gnrpa_endogenous_ensemble": 0.6961,
+    "headline_R2_lasso_baseline": 0.6313,
+    "headline_improvement_absolute": 0.0648,
+    "headline_feature_universe_size": 1072
+  },
+  "raw_input_schemas": {
+    "yahoo_finance_market_panel": {
+      "primary_key": "trading_date",
+      "columns": {
+        "trading_date": "datetime64[ns]",
+        "ndx_close": "float64",
+        "ndx_volume": "int64",
+        "vix_close": "float64",
+        "usd_index_close": "float64",
+        "source_fetched_at_utc": "datetime64[ns]",
+        "raw_adjustment_flag": "str"
+      },
+      "adjustment_convention": {
+        "ndx_close": "close_adjusted_vendor_default",
+        "vix_close": "raw_close_no_adjustment",
+        "usd_index_close": "close_adjusted_vendor_default",
+        "rationale": "Unadjusted close on the NASDAQ-100 index injects dividend-ex-date discontinuities into r_t = (P_t - P_{t-1})/P_{t-1}, corrupting the target Y_t = sum_{k=0}^{4} r_{t-k}."
+      },
+      "usd_index_vendor_variant": "DXY_ICE"
+    },
+    "fred_macroeconomic_panel": {
+      "primary_key": "observation_date",
+      "columns": {
+        "observation_date": "datetime64[ns]",
+        "rate_short": "float64",
+        "rate_long": "float64",
+        "spread_2s10s": "float64",
+        "spread_hy": "float64",
+        "inflation_cpi": "float64",
+        "labor_unrate": "float64",
+        "labor_payems": "float64"
+      },
+      "fred_series_ids": {
+        "rate_short": "DGS2",
+        "rate_long": "DGS10",
+        "spread_2s10s": "T10Y2Y",
+        "spread_hy": "BAMLH0A0HYM2",
+        "inflation_cpi": "CPIAUCSL",
+        "labor_unrate": "UNRATE",
+        "labor_payems": "PAYEMS"
+      },
+      "release_lag_days_by_series": {
+        "rate_short": 1,
+        "rate_long": 1,
+        "spread_2s10s": 1,
+        "spread_hy": 1,
+        "inflation_cpi": 30,
+        "labor_unrate": 14,
+        "labor_payems": 14
+      },
+      "date_convention": "reference_date",
+      "forward_fill_policy": "forward_fill_after_release_lag"
+    },
+    "factor_library_panel": {
+      "primary_key": "date",
+      "columns": {
+        "date": "datetime64[ns]",
+        "MKT": "float64",
+        "SMB": "float64",
+        "HML": "float64",
+        "RMW": "float64",
+        "CMA": "float64",
+        "MOM": "float64",
+        "vendor_vintage_id": "str"
+      },
+      "vendor_vintage_id": "F-F_Research_Data_5_Factors_2x3_daily_vintage_archive",
+      "date_convention": "library_published_date = last_session_of_period"
+    },
+    "trading_calendar": {
+      "primary_key": "trading_date",
+      "columns": {
+        "trading_date": "datetime64[ns]",
+        "session_open_flag": "bool",
+        "half_day_flag": "bool",
+        "exchange": "category"
+      },
+      "target_row_count": 6260,
+      "calendar_source": "union_of_market_sessions",
+      "half_day_handling": "keep",
+      "earliest_session": "2000-01-03",
+      "latest_session": "2026-03-31"
+    }
+  },
+  "feature_generation_policy": {
+    "base_series": {
+      "market": [
+        "ndx_close",
+        "ndx_volume",
+        "vix_close",
+        "usd_index_close"
+      ],
+      "macro": [
+        "rate_short",
+        "rate_long",
+        "spread_2s10s",
+        "spread_hy",
+        "inflation_cpi",
+        "labor_unrate",
+        "labor_payems"
+      ],
+      "factor": [
+        "MKT",
+        "SMB",
+        "HML",
+        "RMW",
+        "CMA",
+        "MOM"
+      ],
+      "n_base_series": 17
+    },
+    "rolling_windows_W": [
+      5,
+      21,
+      63,
+      126,
+      252
+    ],
+    "lag_offsets": [
+      1,
+      2,
+      3,
+      5
+    ],
+    "leakage_lookback_threshold_days": 5,
+    "target_window_information_barrier": {
+      "enabled": true,
+      "horizon_source": "eq3_target_and_partition.aggregation_window",
+      "lagged_columns": [
+        "ndx_close",
+        "ndx_volume",
+        "MKT"
+      ],
+      "price_columns": [
+        "ndx_close"
+      ],
+      "return_columns": [
+        "MKT"
+      ],
+      "audit": {
+        "n_probes": 3,
+        "probe_epsilon": 0.001,
+        "lineage_noise": 0.05,
+        "change_tolerance": 1e-09,
+        "holdout_fraction": 0.3,
+        "max_reconstruction_r2": 0.1,
+        "ridge_lambda": 1e-05,
+        "seed": 20261022
+      }
+    },
+    "operator_application_matrix": {
+      "level_raw": 1,
+      "first_difference": 1,
+      "rolling_mean_W": 5,
+      "rolling_std_W": 5,
+      "rolling_sum_W": 5,
+      "lagged_level_offsets": 4,
+      "lagged_first_difference_offsets": 4,
+      "per_series_subtotal": 25
+    },
+    "per_series_features_total": "17 * 25 = 425",
+    "rolling_operator_std_convention": "sample",
+    "rolling_operator_min_periods_policy": "full_window",
+    "additional_transforms": {
+      "squared_levels_on_volatility_series": {
+        "count": 1,
+        "rationale": "e.g. VIX_t^2 explicitly named in §3.1 and confirmed in Table 4"
+      },
+      "squared_first_diffs_on_volatility": {
+        "count": 1,
+        "rationale": "e.g. (Delta VIX_t)^2"
+      },
+      "squared_levels_on_market_series": {
+        "count": 1,
+        "rationale": "e.g. NDX level squared"
+      },
+      "cross_family_interactions_VIX_macro": {
+        "count": 7,
+        "rationale": "VIX x each of the 7 macro series"
+      },
+      "cross_family_interactions_VIX_factor": {
+        "count": 6,
+        "rationale": "VIX x each of the 6 factor series"
+      },
+      "factor_pair_interactions": {
+        "count": 15,
+        "rationale": "6 choose 2 = 15 pairs"
+      },
+      "rolling_mean_of_first_difference_W_5_21_63": {
+        "count": "17 * 3 = 51",
+        "rationale": "rolling mean of the first difference at W in {5,21,63}"
+      },
+      "rolling_std_of_first_difference_W_5_21_63": {
+        "count": "17 * 3 = 51",
+        "rationale": "rolling std of the first difference at W in {5,21,63}"
+      },
+      "subtotal": "1 + 1 + 1 + 7 + 6 + 15 + 51 + 51 = 133"
+    },
+    "technical_indicator_inventory": {
+      "source_series": "ndx_close and ndx_volume",
+      "lookback_minimum_days": 5,
+      "indicators": [
+        {
+          "name": "RSI",
+          "parameters": [
+            6,
+            7,
+            9,
+            14,
+            21,
+            28
+          ],
+          "count": 6
+        },
+        {
+          "name": "Stochastic_%K_%D",
+          "parameters": [
+            [
+              5,
+              3
+            ],
+            [
+              9,
+              3
+            ],
+            [
+              14,
+              3
+            ],
+            [
+              21,
+              3
+            ],
+            [
+              28,
+              3
+            ]
+          ],
+          "count": 10
+        },
+        {
+          "name": "Williams_%R",
+          "parameters": [
+            5,
+            14,
+            21
+          ],
+          "count": 3
+        },
+        {
+          "name": "CCI",
+          "parameters": [
+            5,
+            14,
+            20,
+            30
+          ],
+          "count": 4
+        },
+        {
+          "name": "ATR",
+          "parameters": [
+            5,
+            10,
+            14,
+            21
+          ],
+          "count": 4
+        },
+        {
+          "name": "Bollinger_components",
+          "parameters": [
+            [
+              20,
+              2
+            ],
+            [
+              50,
+              2
+            ]
+          ],
+          "count": 8
+        },
+        {
+          "name": "Donchian_channel",
+          "parameters": [
+            [
+              20
+            ],
+            [
+              50
+            ],
+            [
+              100
+            ]
+          ],
+          "count": 6
+        },
+        {
+          "name": "Rate_of_Change",
+          "parameters": [
+            5,
+            10,
+            21,
+            63
+          ],
+          "count": 4
+        },
+        {
+          "name": "Momentum",
+          "parameters": [
+            5,
+            10,
+            21,
+            63
+          ],
+          "count": 4
+        },
+        {
+          "name": "SMA",
+          "parameters": [
+            5,
+            10,
+            20,
+            50,
+            100,
+            200
+          ],
+          "count": 6
+        },
+        {
+          "name": "EMA",
+          "parameters": [
+            5,
+            10,
+            20,
+            50,
+            100,
+            200
+          ],
+          "count": 6
+        },
+        {
+          "name": "MACD",
+          "parameters": [
+            [
+              5,
+              35,
+              5
+            ],
+            [
+              12,
+              26,
+              9
+            ],
+            [
+              19,
+              39,
+              9
+            ]
+          ],
+          "count": 9
+        },
+        {
+          "name": "Volume_MA",
+          "parameters": [
+            5,
+            10,
+            20
+          ],
+          "count": 3
+        },
+        {
+          "name": "OBV",
+          "parameters": [
+            null
+          ],
+          "count": 1
+        },
+        {
+          "name": "Accumulation_Distribution",
+          "parameters": [
+            null
+          ],
+          "count": 1
+        },
+        {
+          "name": "Money_Flow_Index",
+          "parameters": [
+            14
+          ],
+          "count": 1
+        },
+        {
+          "name": "TRIX",
+          "parameters": [
+            15
+          ],
+          "count": 1
+        },
+        {
+          "name": "Ultimate_Oscillator",
+          "parameters": [
+            7,
+            14,
+            28
+          ],
+          "count": 1
+        },
+        {
+          "name": "Parabolic_SAR",
+          "parameters": [
+            [
+              0.02,
+              0.2
+            ]
+          ],
+          "count": 1
+        },
+        {
+          "name": "Ichimoku_components",
+          "parameters": [
+            [
+              9,
+              26,
+              52
+            ]
+          ],
+          "count": 5
+        },
+        {
+          "name": "Pivot_points",
+          "parameters": [
+            null
+          ],
+          "count": 5
+        },
+        {
+          "name": "Chaikin_Oscillator",
+          "parameters": [
+            [
+              3,
+              10
+            ]
+          ],
+          "count": 1
+        },
+        {
+          "name": "Aroon_Up_Down",
+          "parameters": [
+            14,
+            25
+          ],
+          "count": 4
+        },
+        {
+          "name": "DPO",
+          "parameters": [
+            20
+          ],
+          "count": 1
+        },
+        {
+          "name": "EOM",
+          "parameters": [
+            14
+          ],
+          "count": 1
+        },
+        {
+          "name": "KST",
+          "parameters": [
+            null
+          ],
+          "count": 1
+        },
+        {
+          "name": "Coppock_Curve",
+          "parameters": [
+            null
+          ],
+          "count": 1
+        },
+        {
+          "name": "Fisher_Transform",
+          "parameters": [
+            10
+          ],
+          "count": 1
+        },
+        {
+          "name": "Mass_Index",
+          "parameters": [
+            25
+          ],
+          "count": 1
+        },
+        {
+          "name": "Vortex_Indicator",
+          "parameters": [
+            14
+          ],
+          "count": 1
+        },
+        {
+          "name": "Elder_Ray",
+          "parameters": [
+            13
+          ],
+          "count": 2
+        }
+      ],
+      "subtotal": 111
+    },
+    "reconciliation_to_p_1072": {
+      "per_series_features": 425,
+      "additional_transforms": 133,
+      "technical_indicators": 111,
+      "unaccounted_remainder": 403,
+      "reconciliation_status": "INCOMPLETE. The manuscript's p = 1,072 is stated but not constructively derivable from the disclosed feature families. The 403-feature remainder must be closed by (a) the manuscript's undisclosed technical-indicator inventory, (b) additional rolling-statistic layers (e.g., rolling statistics of rolling statistics, higher-order differences, cross-window interactions), or (c) additional interaction and nonlinear constructs not enumerated. UNSPECIFIED IN MANUSCRIPT — the reconciliation cannot be completed from the source."
+    },
+    "exclusion_rules": {
+      "rule_1": "Drop every NASDAQ-100-derived indicator whose lookback is strictly < 5 trading days.",
+      "rule_2": "Retain exogenous (macro, VIX, spread, factor) series contemporaneously at time t.",
+      "rule_3": "Do not apply lag structures to the target Y_t."
+    },
+    "column_naming_convention": "canonical convention: {source}__{op}__{param} e.g. `vix_close__rolling_mean__W5`, `vix_close__diff__lag1`, `vix_close__square`. UNSPECIFIED IN MANUSCRIPT — placeholder; enforce internally for reproducibility."
+  },
+  "data_preprocessing_parameters": {
+    "feature_standardization": null,
+    "centering": null,
+    "scaling": null,
+    "winsorization": null,
+    "missing_value_policy": null,
+    "outlier_handling": null,
+    "target_burn_in_handling": null,
+    "categorical_encoding": "not_applicable",
+    "feature_selection_pre_filter": "drop NDX-derived technicals with lookback < 5 days",
+    "train_test_shuffle": false,
+    "lookahead_prevention": "all rolling windows terminate at t",
+    "row_count_invariant": 6260,
+    "feature_count_invariant": 1072
+  },
+  "eq1_policy": {
+    "eq_number": 1,
+    "equation_form": "pi(a_k | s) = exp(w_{s,a_k}/tau + beta_{s,a_k}) / sum_j exp(w_{s,a_j}/tau + beta_{s,a_j})",
+    "policy_weight_symbol": "W",
+    "policy_matrix_size": [
+      1072,
+      1072
+    ],
+    "policy_matrix_entries_total": 1149184,
+    "policy_matrix_data_type": "float64",
+    "policy_initialization": "zero_uniform",
+    "policy_initialization_alternatives": [
+      "zero_uniform",
+      "random_normal_sigma_0_01",
+      "random_normal_sigma_0_1"
+    ],
+    "temperature_symbol": "tau",
+    "temperature_value_fixed": 1.52,
+    "temperature_value_tuned": 0.868,
+    "temperature_value_endogenous": 1.515,
+    "parameter_identification_note": "beta_mag and tau identified only up to their ratio through the learned channel",
+    "action_masking_applied": true,
+    "sampling_mechanism": "single_categorical_draw",
+    "sampling_label_in_paper": "Gibbs Sampling Selection",
+    "terminology_caveat": "mechanically a single categorical draw from a softmax distribution, NOT MCMC Gibbs",
+    "reference_keys": [
+      "cazenave2020generalized",
+      "rosin2011nested",
+      "cazenave2017nested"
+    ]
+  },
+  "eq2_adaptation": {
+    "eq_number": 2,
+    "equation_form": "w_{s,a_j} <- w_{s,a_j} - (alpha/tau) * (pi(a_j|s) - I{a_j = a*})",
+    "update_target_symbol": "a*",
+    "update_target_semantic": "action taken in the best rollout sequence retained at this level",
+    "effective_step_size": "alpha/tau",
+    "step_direction_for_best_action": "increase w",
+    "step_direction_for_other_actions": "decrease w",
+    "alpha_L1_value_endogenous": 0.177,
+    "alpha_L1_value_fixed": 1.514,
+    "alpha_L1_value_tuned": 2.003,
+    "alpha_high_value_endogenous": 2.212,
+    "alpha_routing_rule": "alpha = alpha_L1 if L == 1 else alpha_high",
+    "uses_value_function": false,
+    "uses_advantage_estimate": false,
+    "uses_temporal_difference": false,
+    "uses_bootstrapping": false,
+    "update_type": "policy-gradient-style softmax update with one-hot target"
+  },
+  "eq3_target_and_partition": {
+    "eq_number": 3,
+    "equation_form": "Y_t = sum_{k=0}^{4} r_{t-k};  r_t = (P_t - P_{t-1}) / P_{t-1}",
+    "return_operator": "simple_arithmetic_return_not_log",
+    "aggregation_window": 5,
+    "burn_in_rows": 4,
+    "span_start": "2000-01-01",
+    "span_end": "2026-03-31",
+    "observation_count_T": 6260,
+    "n_features_p": 1072,
+    "rolling_lookback_windows_W": [
+      5,
+      21,
+      63,
+      126,
+      252
+    ],
+    "leakage_exclusion_lookback_threshold": 5,
+    "leakage_exclusion_scope": "technical indicators derived from the NASDAQ-100",
+    "split_date": "2023-12-31",
+    "train_window_fixed_days": 1890,
+    "train_window_tuned_days": 1890,
+    "train_window_endogenous_days": 1000,
+    "internal_validation_window_days": 562,
+    "test_window_days": 562,
+    "test_window_calendar_span": [
+      "2024-01-02",
+      "2026-03-31"
+    ],
+    "validation_positioning": "immediately_preceding_test_window",
+    "outer_walk_forward_folds": 3,
+    "outer_walk_forward_overlap": 0,
+    "outer_walk_forward_data_scope": "pre_2024_only",
+    "outer_walk_forward_fold_boundaries": null,
+    "R2_convention": "1 - SSD_resid / SSD_total(evaluation_sample_variance)",
+    "test_window_data_availability": "post_2026-03-31_vintage_required"
+  },
+  "eq4_objective": {
+    "eq_number": 4,
+    "equation_form": "min_theta (1/(2*N_train)) ||Y_train - X_{train,S} theta||_2^2  s.t. ||theta||_0 <= K",
+    "residual_norm_order": 2,
+    "cardinality_norm_order": 0,
+    "scale_denominator": "2 * N_train",
+    "K_upper_bound": 60,
+    "N_train_value_fixed_tuned": 1890,
+    "N_train_value_endogenous": 1000,
+    "evaluation_dataset": "validation_set",
+    "search_space_full_size": 50600563326827654588123836679729326762389162441035529589225339506857584891998836722990095925359281123796769466079202977847452184346448369216753349985184627480379356069141590341116726935523304085309941919618186267140501870856173174654525838912289889085202514128089692388083353653807625633046581877161501565826926935273373696,
+    "search_modes": [
+      "fixed_cardinality",
+      "adaptive_endogenous"
+    ]
+  },
+  "eq5_mdp": {
+    "eq_number": 5,
+    "equation_form": "A(s_t) = (F \\ S_t) union {a_stop}",
+    "mdp_tuple": "(S, A, R)",
+    "feature_universe_symbol": "F",
+    "feature_universe_size": 1072,
+    "state_definition": "(f_last, S_t)",
+    "initial_state": "(f_last=None, S_0=set())",
+    "state_space_nominal": "p * 2^p",
+    "state_space_factored": "p^2 + p",
+    "action_types": [
+      "add_feature",
+      "stop"
+    ],
+    "stop_action_symbol": "a_stop",
+    "transition": "S_{t+1} = S_t union {a}; f_last <- a",
+    "transition_monotonicity": "support_non_decreasing_no_removal_no_swap",
+    "terminal_conditions": [
+      "a_stop_selected",
+      "cardinality_equals_K_max"
+    ],
+    "reward_timing": "terminal_only",
+    "reward_is_delayed": true,
+    "reward_is_discounted": false,
+    "reward_is_summed": false
+  },
+  "eq6_fit": {
+    "eq_number": 6,
+    "equation_form": "theta_hat_S = (X_{train,S}^T X_{train,S} + lambda I)^{-1} X_{train,S}^T Y_train",
+    "estimator_type": "ridge_stabilized_OLS",
+    "shrinkage_applied": false,
+    "stabilizer_symbol": "lambda",
+    "stabilizer_value": 1e-05,
+    "stabilizer_role": "numerical stability only",
+    "linear_algebra_backend": "NumPy",
+    "gram_matrix_inversion_method": "np.linalg.solve_gram_with_I",
+    "gram_matrix_fallback": "np.linalg.pinv",
+    "fit_dataset": "train_block",
+    "score_dataset": "internal_validation_562_days",
+    "final_eval_dataset": "test_block_562_days"
+  },
+  "eq7_redundancy": {
+    "eq_number": 7,
+    "equation_form": "Red_{top-k-rms}(f_i,S) = ((1/min(k,|S|)) * sum_{m=1..min(k,|S|)} c_(m)^2)^{1/2}",
+    "correlation_type": "sample_Pearson",
+    "relevance_formula": "Rel(f_i) = |rho(f_i, Y)|",
+    "redundancy_pool_formula": "C_{i,S} = {|rho(f_i, f_j)| : f_j in S}",
+    "order_statistic_definition": "c_(m) = m-th largest element of C_{i,S}",
+    "k_endogenous": 3,
+    "metric_settings": [
+      "mean",
+      "rms",
+      "top-3-rms"
+    ],
+    "metric_assignment_fixed": "mean",
+    "metric_assignment_tuned": "rms",
+    "metric_assignment_endogenous": "top-3-rms",
+    "variant_mean_formula": "Red_mean(f_i,S) = (1/|S|) * sum_{m=1..|S|} c_(m)^2",
+    "variant_rms_formula": "Red_rms(f_i,S) = ((1/|S|) * sum_{m=1..|S|} c_(m)^2)^{1/2}",
+    "correlation_estimation_window": "train_window_full_1890_or_1000_days_by_config",
+    "correlation_estimation_window_alternatives": [
+      "train_window_full",
+      "expanding_from_train_start",
+      "rolling_252_days"
+    ]
+  },
+  "eq8_feature_bias": {
+    "eq_number": 8,
+    "equation_form": "beta(f_i|S) = beta_mag * [gamma * Rel(f_i) - (1-gamma) * Red_{top-k-rms}(f_i,S)]",
+    "gamma_domain": [
+      0.0,
+      1.0
+    ],
+    "gamma_value_fixed": 0.666,
+    "gamma_value_tuned": 0.772,
+    "gamma_value_endogenous": 0.811,
+    "beta_mag_value_fixed": 24.82,
+    "beta_mag_value_tuned": 14.97,
+    "beta_mag_value_endogenous": 13.72
+  },
+  "eq9_stop_gravity": {
+    "eq_number": 9,
+    "equation_form_cases": [
+      "beta(a_stop|S) = -inf if |S| < K_min",
+      "beta(a_stop|S) = beta_mag * gamma * beta_stop * ((|S|-K_min)/max(1,K_max-|S|))^{3/2} if |S| >= K_min"
+    ],
+    "K_min_symbol": "K_min",
+    "K_min_value": 5,
+    "K_min_resolution_rationale": "Chosen as the lower bound of the candidate set most consistent with the endogenous mean size 18.6 and tuned target 15.",
+    "K_max_symbol": "K_max",
+    "K_max_value": 60,
+    "exponent_value": 1.5,
+    "exponent_rationale": "empirically chosen constant per paper",
+    "beta_stop_value_endogenous": 0.909,
+    "beta_stop_value_fixed": null,
+    "beta_stop_value_tuned": null,
+    "convexity_property": "bias grows convexly as |S| approaches K_max",
+    "fixed_cardinality_enforcement_mechanism": "hard_mask_stop_until_cardinality_equals_K",
+    "fixed_cardinality_enforcement_description": "For fixed and tuned configurations, set beta(a_stop|S) = -inf until |S| = K, then set beta(a_stop|S) = 0; equivalently K_min = K_max = K."
+  },
+  "eq10_reward": {
+    "eq_number": 10,
+    "equation_form": "R(S) = (round(R2_val(S), 3), -|S|, -MaxVIF(S))",
+    "primary_key": "rounded_validation_R2",
+    "primary_key_rounding_places": 3,
+    "primary_key_rounding_operator": "round_half_away_from_zero",
+    "secondary_key": "-|S|",
+    "secondary_key_semantic": "prefer smaller subsets among ties",
+    "tertiary_key": "-MaxVIF(S)",
+    "tertiary_key_semantic": "prefer lower internal multicollinearity among residual ties",
+    "comparison_operator": "lexicographic_strict_greater_than",
+    "quantization_note": "3-decimal rounding manufactures ties that activate the lower keys",
+    "reward_scalarization_active": false
+  },
+  "eq11_maxvif": {
+    "eq_number": 11,
+    "equation_form": "MaxVIF(S) = max_{j in [1..|S|]} (C_S^{-1})_{jj}",
+    "correlation_matrix_symbol": "C_S",
+    "correlation_matrix_shape": "(|S|, |S|)",
+    "role": "tie_breaker_inside_lexicographic_reward",
+    "correlation_matrix_fit_on": "validation_subset",
+    "singular_handling": "moore_penrose_pseudoinverse",
+    "singular_handling_rationale": "Under severe collinearity the correlation matrix may be rank-deficient; Moore-Penrose pseudoinverse preserves the MaxVIF diagnostic's continuity and avoids subset rejection.",
+    "reference_key": "belsley1980regression"
+  },
+  "eq12_ensemble": {
+    "eq_number": 12,
+    "equation_form": "y_hat_ens = (1/M) * sum_m X theta_hat^(m) = X * theta*",
+    "M_value_fixed": 18,
+    "M_value_tuned": 18,
+    "M_value_endogenous": 12,
+    "aggregation_mode": "soft_voting_mean_of_coefficient_vectors",
+    "batch_size": 6,
+    "batch_count_fixed": 3,
+    "batch_count_tuned": 3,
+    "batch_count_endogenous": 2,
+    "stabilization_threshold": 0.01,
+    "stabilization_window": "two_consecutive_batches",
+    "closure_property": "affine_combination_of_affine_maps_is_affine",
+    "preserves_linear_attribution": true,
+    "refit_after_averaging": false,
+    "implicit_zero_embedding_required": true,
+    "zero_embedding_procedure": "Construct a length-p=1072 real vector per run m, with entries from theta_hat^(m) at selected feature indices and 0 elsewhere; average the p-length vectors elementwise to obtain theta* in R^p.",
+    "support_of_theta_star": "union of S^(m) over m",
+    "contrast_to_tree_ensembles": "tree-based ensembles are not closed under averaging",
+    "hyperparameters_fixed_across_runs": true,
+    "hyperparameters_redraw_policy": "fixed_per_configuration",
+    "seeds_per_run_distinct": true,
+    "seed_management_convention": "one_run_seed_seeds_all_stochastic_loci_within_run"
+  },
+  "algorithm_1_controller": {
+    "alg_number": 1,
+    "caption": "GNRPA with Endogenous Stopping",
+    "functions_in_block": [
+      "GNRPA(L, s, W)",
+      "Rollout(s, W)"
+    ],
+    "n_functions": 2,
+    "unexpanded_subroutines": [
+      "ComputeHeuristics",
+      "EvaluateState"
+    ],
+    "n_unexpanded_subroutines": 2,
+    "requires": [
+      "Level L",
+      "State s",
+      "Policy W",
+      "Max Iters I_L",
+      "Patience P"
+    ],
+    "recursion_depth_actual": 3,
+    "recursion_termination_L0": "call Rollout(s, W)",
+    "best_score_initial_value": "(-inf, -inf, -inf)",
+    "best_seq_initial_value": "empty",
+    "no_improve_counter_initial_value": 0,
+    "iteration_counter_initial_value": 0,
+    "termination_rule_L1": "break if no_improve >= P and L == 1",
+    "termination_rule_L_gt_1": "break if n >= I_L and L > 1",
+    "iteration_budget_fixed": [
+      84,
+      3,
+      6
+    ],
+    "iteration_budget_tuned": [
+      18,
+      28,
+      18
+    ],
+    "iteration_budget_endogenous": [
+      "var.",
+      30,
+      15
+    ],
+    "level1_patience_value_endogenous": 63,
+    "rollout_loop_condition": "a_stop not selected AND |s| < K_max",
+    "rollout_steps": [
+      "compute beta (Eqs. 7, 8, 9)",
+      "sample a ~ pi(a|s) (Eq. 1)",
+      "update s <- s union {a}"
+    ],
+    "rollout_return": "terminal subset s and EvaluateState(s, X_train, Y_train)",
+    "runtime_gap_attribution": "most additional runtime from patience P, not stop mechanism",
+    "reference_key": "cazenave2026montparnasse"
+  },
+  "table2_configs": {
+    "training_window_days": {
+      "fixed": 1890,
+      "tuned": 1890,
+      "endogenous": 1000
+    },
+    "target_features_K": {
+      "fixed": 60,
+      "tuned": 15,
+      "endogenous": "endogenous"
+    },
+    "redundancy_metric": {
+      "fixed": "mean",
+      "tuned": "rms",
+      "endogenous": "top-3-rms"
+    },
+    "gamma": {
+      "fixed": 0.666,
+      "tuned": 0.772,
+      "endogenous": 0.811
+    },
+    "beta_mag": {
+      "fixed": 24.82,
+      "tuned": 14.97,
+      "endogenous": 13.72
+    },
+    "beta_stop": {
+      "fixed": null,
+      "tuned": null,
+      "endogenous": 0.909
+    },
+    "tau": {
+      "fixed": 1.52,
+      "tuned": 0.868,
+      "endogenous": 1.515
+    },
+    "alpha_L1": {
+      "fixed": 1.514,
+      "tuned": 2.003,
+      "endogenous": 0.177
+    },
+    "alpha_high": {
+      "fixed": 1.514,
+      "tuned": 2.003,
+      "endogenous": 2.212
+    },
+    "tree_iters_I1_I2_I3": {
+      "fixed": [
+        84,
+        3,
+        6
+      ],
+      "tuned": [
+        18,
+        28,
+        18
+      ],
+      "endogenous": [
+        "var.",
+        30,
+        15
+      ]
+    },
+    "level1_patience": {
+      "fixed": null,
+      "tuned": null,
+      "endogenous": 63
+    },
+    "best_cv_validation_R2": {
+      "fixed": 0.7089,
+      "tuned": 0.7491,
+      "endogenous": 0.7607
+    }
+  },
+  "table3_ensemble_diagnostics": {
+    "runs_executed": {
+      "fixed": 18,
+      "tuned": 18,
+      "endogenous": 12
+    },
+    "ensemble_build_time_seconds": {
+      "fixed": 166,
+      "tuned": 343,
+      "endogenous": 2127
+    },
+    "ensemble_validation_R2": {
+      "fixed": 0.702,
+      "tuned": 0.723,
+      "endogenous": 0.755
+    },
+    "individual_oos_R2_mean": {
+      "fixed": 0.643,
+      "tuned": 0.665,
+      "endogenous": 0.668
+    },
+    "individual_oos_R2_sd": {
+      "fixed": 0.03,
+      "tuned": 0.039,
+      "endogenous": 0.009
+    },
+    "individual_oos_R2_range": {
+      "fixed": [
+        0.575,
+        0.686
+      ],
+      "tuned": [
+        0.519,
+        0.698
+      ],
+      "endogenous": [
+        0.65,
+        0.682
+      ]
+    },
+    "global_features_union": {
+      "fixed": 341,
+      "tuned": 74,
+      "endogenous": 59
+    }
+  },
+  "table4_exemplar": {
+    "best_individual_run_size": 15,
+    "best_individual_run_oos_R2": 0.698,
+    "presentation_note": "post-hoc best draw; NOT the headline metric",
+    "coefficients": {
+      "VIX_{t-5}": 0.0513,
+      "VIX_{t-1}^{(5d mean)}": -0.0621,
+      "VIX_t^2": 0.0109,
+      "Delta_VIX_t": -0.0095,
+      "Delta_VIX_{t-1}": -0.0043,
+      "Delta_VIX_{t-2}": -0.0023,
+      "Delta_HY_Spread_t": -0.0044,
+      "Delta_HY_Spread_{t-1}": -0.0052,
+      "Delta_HY_Spread_{t-2}": -0.0046,
+      "Delta_HY_Spread_{t-3}": -0.0041,
+      "CMA_t^{(5d mean)}": -0.0056,
+      "CMA_{t-1}^{(5d mean)}": 0.0005,
+      "HML_t^{(5d mean)}": -0.008,
+      "HML_{t-2}^{(5d std)}": 0.0024,
+      "SMB_t^{(21d mean)}": 0.0014
+    },
+    "feature_families_represented": [
+      "Volatility Metrics",
+      "Credit Stress",
+      "Factor Exposures"
+    ],
+    "economic_mechanisms_interpreted": [
+      "volatility spread construction (opposing signs)",
+      "cumulative credit-spread drag (same-sign lag block)",
+      "factor exposures with lagged smoothing"
+    ],
+    "mechanism_incompleteness_policy": "record_not_raise",
+    "coefficient_units": "per_training_sd_feature_raw_target"
+  },
+  "baselines": {
+    "standardization": "training_window_z_score",
+    "ridge_L2": {
+      "penalty_type": "L2",
+      "features_retained": 1072,
+      "performs_feature_selection": false,
+      "penalty_value_alpha": 1.0,
+      "penalty_value_alpha_cv_selected": null,
+      "alpha_grid": [
+        0.0001,
+        0.00031622776601683794,
+        0.001,
+        0.0031622776601683794,
+        0.01,
+        0.03162277660168379,
+        0.1,
+        0.31622776601683794,
+        1.0,
+        3.1622776601683795,
+        10.0,
+        31.622776601683793,
+        100.0,
+        316.22776601683796,
+        1000.0,
+        3162.2776601683795,
+        10000.0
+      ],
+      "oos_R2": 0.525,
+      "runtime_seconds": "<1.0",
+      "reference_key": "hoerl1970ridge"
+    },
+    "lasso_L1": {
+      "penalty_type": "L1",
+      "training_window_days": 1890,
+      "lambda_selected": 0.0745,
+      "features_selected": 60,
+      "oos_R2": 0.6313,
+      "runtime_seconds": "<1.0",
+      "sparsity_stress_features": [
+        14,
+        16
+      ],
+      "sparsity_stress_oos_R2_range": [
+        0.39,
+        0.43
+      ],
+      "sparsity_stress_comparison_gnrpa_R2": 0.6648,
+      "sparsity_stress_lambda_bracket": [
+        0.001,
+        0.0745
+      ],
+      "reference_key": "tibshirani1996regression"
+    },
+    "elastic_net": {
+      "penalty_type": "L1+L2_mixed",
+      "grid_combinations": 180,
+      "l1_ratio_selected": 0.99,
+      "grid_boundary_reached": true,
+      "features_selected": 55,
+      "oos_R2": 0.6243,
+      "runtime_seconds": "<1.0",
+      "reference_key": "zou2005regularization"
+    },
+    "greedy_L0": {
+      "algorithm": "forward_stepwise_selection",
+      "cv_procedure": "3-fold_cross_validation",
+      "stopping_K": 5,
+      "oos_R2": 0.2489,
+      "runtime_seconds": 17.1,
+      "reference_key": "hastie2009elements"
+    }
+  },
+  "outer_tuning": {
+    "framework": "Optuna",
+    "reference_key": "akiba2019optuna",
+    "trial_budgets": {
+      "fixed": 15,
+      "tuned": 50,
+      "endogenous": 20
+    },
+    "wall_clock_hours": {
+      "fixed": 0.41,
+      "tuned": 4.08,
+      "endogenous": 11.27
+    },
+    "objective": "mean_validation_R2_across_three_non_overlapping_walk_forward_folds",
+    "walk_forward_folds": 3,
+    "fold_overlap": 0,
+    "data_scope": "pre_2024_only",
+    "sampler_type": "TPESampler",
+    "pruner_type": "MedianPruner",
+    "random_state": 42,
+    "search_space_includes": [
+      "training_window_endogenous_only",
+      "target_K_tuned_only",
+      "redundancy_metric",
+      "gamma",
+      "beta_mag",
+      "beta_stop_endogenous_only",
+      "tau",
+      "alpha_L1",
+      "alpha_high",
+      "tree_iters_I1_I2_I3",
+      "level1_patience_endogenous_only"
+    ],
+    "optimizer_curse_reference_key": "smith2006optimizer",
+    "optimizer_curse_gap_ensemble": 0.0646,
+    "optimizer_curse_gap_individual_mean": 0.0925
+  },
+  "compute_and_reproducibility": {
+    "hardware": "single_16-core_workstation",
+    "accelerators": null,
+    "search_runtime_seconds": {
+      "fixed": 52.9,
+      "tuned": 106.9,
+      "endogenous": 1671.6
+    },
+    "ensemble_runtime_seconds": {
+      "fixed": 166,
+      "tuned": 343,
+      "endogenous": 2127
+    },
+    "convex_baseline_runtime_seconds": "<1.0",
+    "greedy_L0_runtime_seconds": 17.1,
+    "future_optimization_opportunities": [
+      "compiled_languages",
+      "parallelized_ensembles",
+      "ablating_root_level_patience_P"
+    ],
+    "global_random_seeds": {
+      "numpy_seed": 42,
+      "python_random_seed": 42,
+      "joblib_seed": 42
+    },
+    "version_pinning": {
+      "numpy": ">=1.24,<2.0",
+      "scikit-learn": ">=1.3,<2.0",
+      "optuna": ">=3.4,<4.0",
+      "pandas": ">=2.0,<3.0"
+    },
+    "unit_test_harness": [
+      "gram_inversion_well_conditioned",
+      "gram_inversion_singular_fallback",
+      "lexicographic_ordering_quantized_tie",
+      "stopping_bias_saturation_at_Kmin",
+      "mask_excludes_selected_features",
+      "ensemble_soft_voting_linearity_identity"
+    ]
+  },
+  "llm_components": {
+    "llm_names": null,
+    "llm_providers": null,
+    "llm_api_keys": null,
+    "llm_endpoints": null,
+    "llm_models_used": null,
+    "llm_settings": {
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "max_tokens": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "response_format": null
+    },
+    "tokenizer_choice": null,
+    "few_shot_exemplars": null,
+    "chain_of_thought_enabled": null,
+    "tool_calling_enabled": null,
+    "retrieval_augmented_generation": null,
+    "guardrails": null
+  },
+  "prompt_templates": {
+    "system_prompt_string": "",
+    "user_prompt_string": "",
+    "few_shot_prompt_string": "",
+    "chain_of_thought_prompt_string": "",
+    "tool_use_prompt_string": ""
+  },
+  "network_architecture": {
+    "architecture_type": null,
+    "architecture_names_cited_only": [
+      "Temporal Fusion Transformer",
+      "LassoNet",
+      "AlphaGo policy/value networks",
+      "Tree-based ensembles"
+    ],
+    "layers": null,
+    "activation_functions": null,
+    "embedding_layer": null,
+    "attention_mechanism": null,
+    "recurrent_cells": null,
+    "convolutional_layers": null,
+    "output_head": null,
+    "policy_network": null,
+    "value_network": null,
+    "state_function_approximation": "tabular (p x p table)"
+  },
+  "network_training": {
+    "loss_function": null,
+    "optimizer": null,
+    "learning_rate_schedule": null,
+    "batch_size": null,
+    "epochs": null,
+    "early_stopping": null,
+    "regularization": null,
+    "dropout_rate": null,
+    "weight_initialization": null,
+    "gradient_clipping": null,
+    "backpropagation_enabled": false
+  },
+  "figure_1_parameters": {
+    "figure_number": 1,
+    "caption": "Overview of the proposed search framework.",
+    "construction_language": "TikZ",
+    "scale": 0.85,
+    "stages": [
+      "Feature Universe",
+      "1. GNRPA Policy Guidance",
+      "2. Markov Decision Process",
+      "3. Terminal Evaluation"
+    ],
+    "inter_block_flows": [
+      "Feature Universe -> Policy Guidance : Time-Series Data",
+      "Policy Guidance -> MDP : Action Bias (beta)",
+      "MDP -> Terminal Evaluation : Terminal State (STOP)"
+    ]
+  },
+  "figure_2_parameters": {
+    "figure_number": 2,
+    "caption": "Correlation matrix of the best performing individual 15-feature GNRPA subset.",
+    "matrix_shape": [
+      9,
+      9
+    ],
+    "matrix_triangular_form": "lower_triangular_with_diagonal",
+    "diverging_colormap": "blue-white-red",
+    "colorbar_bounds": [
+      -1.0,
+      1.0
+    ],
+    "spatial_scale": 0.48
+  },
+  "reference_keys": {
+    "harris2020array": "NumPy (Eq. 6 linear algebra; §3.2)",
+    "pedregosa2011scikit": "scikit-learn (baselines)",
+    "akiba2019optuna": "Optuna (hyperparameter tuning)",
+    "cazenave2026montparnasse": "Montparnasse (dual learning rates; patience)",
+    "cazenave2020generalized": "GNRPA (Eqs. 1, 2)",
+    "cazenave2017nested": "Selective policies for NRPA",
+    "rosin2011nested": "NRPA",
+    "coulom2006efficient": "MCTS (original)",
+    "kocsis2006bandit": "UCT / bandit-based MCTS",
+    "browne2012survey": "MCTS survey",
+    "silver2016mastering": "AlphaGo (referenced; not adopted)",
+    "puterman1994markov": "MDP formalism",
+    "peng2005feature": "mRMR (Eqs. 7, 8)",
+    "belsley1980regression": "VIF and collinearity diagnostics (Eq. 11)",
+    "bertsimas2016best": "MIO best-subset selection (cited; not reproduced)",
+    "hazimeh2020fast": "Coordinate-descent L0 (cited; not reproduced)",
+    "smith2006optimizer": "Optimizer's curse (CV-to-test gap)",
+    "meinshausen2010stability": "Stability selection (proposed; not executed)",
+    "hoerl1970ridge": "Ridge baseline",
+    "tibshirani1996regression": "Lasso baseline",
+    "zou2005regularization": "Elastic Net baseline",
+    "hastie2009elements": "Forward stepwise (greedy L0 baseline)",
+    "fama2015five": "Fama-French five-factor model",
+    "carhart1997persistence": "Carhart momentum factor",
+    "black1976studies": "Leverage effect (contemporaneous alignment)",
+    "rudin2019stop": "Interpretable-models argument",
+    "lopez2018advances": "Financial ML",
+    "bengio2021machine": "Learning for combinatorial optimization",
+    "chinco2019sparse": "Sparse signals in cross-sectional returns",
+    "fastrich2015constructing": "Sparse portfolio construction (future work)",
+    "chang2000heuristics": "Metaheuristics for index tracking (future work)",
+    "feng2020taming": "Factor-zoo testing",
+    "freyberger2020dissecting": "Characteristics nonparametrically",
+    "gu2020empirical": "Empirical asset pricing via ML",
+    "kozak2020shrinking": "Shrinking cross-section of premiums",
+    "lemhadri2021lassonet": "LassoNet (neural; not instantiated)",
+    "lim2021temporal": "Temporal Fusion Transformer (neural; not instantiated)"
+  },
+  "methodological_notes": {
+    "note_1": "The study is EXPLANATORY, not FORECASTING. Do not relabel R^2 as predictive.",
+    "note_2": "Exogenous variables are contemporaneously aligned, not lagged — deliberate.",
+    "note_3": "No shrinkage is applied beyond the numerical stabilizer lambda = 1e-5.",
+    "note_4": "The reward is a tuple compared lexicographically; do NOT scalarize.",
+    "note_5": "The 3-decimal rounding is load-bearing: it manufactures ties so sparsity and MaxVIF matter.",
+    "note_6": "MaxVIF is a TIE-BREAKER, not an additive penalty.",
+    "note_7": "Endogenous stopping is implemented entirely as a bias on a_stop.",
+    "note_8": "The policy is TABULAR (p x p), not a neural-network function approximator.",
+    "note_9": "Eq. (2) is a policy-gradient-style softmax update with one-hot target; no value function, no bootstrapping, no TD error.",
+    "note_10": "Ensemble aggregation is linear-coefficient averaging; the average of linear maps is linear (Eq. 12).",
+    "note_11": "Iteration budgets were scaled based on empirical convergence during preliminary tuning.",
+    "note_12": "Most additional runtime for the endogenous configuration comes from level-1 patience P, not the stopping mechanism.",
+    "note_13": "CV-to-test gap is the optimizer's curse, not leakage.",
+    "note_14": "The exemplar 15-feature run is a post-hoc best draw; the ensemble average is the headline metric."
+  },
+  "documented_gaps": {
+    "K_min": {
+      "resolved_value": 5,
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "policy_initialization_W": {
+      "resolved_value": "zero_uniform",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "correlation_estimation_window": {
+      "resolved_value": "train_window_full",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "fixed_cardinality_enforcement_mechanism": {
+      "resolved_value": "hard_mask_stop_until_cardinality_equals_K",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "fred_forward_fill_policy": {
+      "resolved_value": "forward_fill_after_release_lag",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "fred_release_vs_reference_date_choice": {
+      "resolved_value": "reference_date",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "random_seeds": {
+      "resolved_value": {
+        "numpy": 42,
+        "python": 42,
+        "joblib": 42
+      },
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "feature_standardization": {
+      "resolved_value": null,
+      "placeholder": false,
+      "audit_critical": false
+    },
+    "centering": {
+      "resolved_value": null,
+      "placeholder": false,
+      "audit_critical": false
+    },
+    "winsorization": {
+      "resolved_value": null,
+      "placeholder": false,
+      "audit_critical": false
+    },
+    "missing_value_policy": {
+      "resolved_value": "reject_subset_on_NaN",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "yahoo_ticker_symbols": {
+      "resolved_value": {
+        "ndx": "^NDX",
+        "vix": "^VIX",
+        "usd": "DX-Y.NYB"
+      },
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "fred_series_ids": {
+      "resolved_value": "see raw_input_schemas.fred_macroeconomic_panel.fred_series_ids",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "factor_dataset_url": {
+      "resolved_value": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "trading_calendar_derivation_rule": {
+      "resolved_value": "union_of_market_sessions",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "target_burn_in_handling": {
+      "resolved_value": "drop_first_4_rows",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "optuna_sampler_type": {
+      "resolved_value": "TPESampler",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "optuna_pruner_type": {
+      "resolved_value": "MedianPruner",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "walk_forward_fold_boundaries": {
+      "resolved_value": "equal_count_non_overlapping",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "maxvif_singular_handling": {
+      "resolved_value": "moore_penrose_pseudoinverse",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "policy_matrix_data_type": {
+      "resolved_value": "float64",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "code_repository_url": {
+      "resolved_value": null,
+      "placeholder": false,
+      "audit_critical": false
+    },
+    "dataset_download_instructions": {
+      "resolved_value": null,
+      "placeholder": false,
+      "audit_critical": false
+    },
+    "feature_generation_policy": {
+      "resolved_value": "see Section 3; 403-feature remainder unresolved",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "test_window_data_availability": {
+      "resolved_value": "post_2026-03-31_vintage",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "gram_matrix_inversion_method": {
+      "resolved_value": "np.linalg.solve_gram_with_I",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "soft_voting_embedding_procedure": {
+      "resolved_value": "zero_embedding_to_R_p_then_average",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "population_vs_sample_std": {
+      "resolved_value": "sample_ddof_1",
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "hyperparameters_fixed_across_runs": {
+      "resolved_value": true,
+      "placeholder": true,
+      "audit_critical": false
+    },
+    "price_adjustment_convention": {
+      "resolved_value": "close_adjusted_vendor_default",
+      "placeholder": true,
+      "audit_critical": true
+    },
+    "usd_index_vendor_variant": {
+      "resolved_value": "DXY_ICE",
+      "placeholder": true,
+      "audit_critical": false
+    }
+  },
+  "verification_targets": {
+    "table1_all_rows": {
+      "Ridge (L2)": {
+        "features": 1072,
+        "time_s": "<1.0",
+        "indiv_R2": 0.525,
+        "ens_R2": null
+      },
+      "Lasso (L1)": {
+        "features": 60,
+        "time_s": "<1.0",
+        "indiv_R2": 0.6313,
+        "ens_R2": null
+      },
+      "Elastic Net": {
+        "features": 55,
+        "time_s": "<1.0",
+        "indiv_R2": 0.6243,
+        "ens_R2": null
+      },
+      "Greedy (L0)": {
+        "features": 5,
+        "time_s": 17.1,
+        "indiv_R2": 0.2489,
+        "ens_R2": null
+      },
+      "Fixed cardinality": {
+        "features": 60,
+        "time_s": 52.9,
+        "indiv_R2": 0.6428,
+        "ens_R2": 0.6855
+      },
+      "Tuned cardinality": {
+        "features": 15,
+        "time_s": 106.9,
+        "indiv_R2": 0.6648,
+        "ens_R2": 0.6908
+      },
+      "Endogenous stopping": {
+        "features": 18.6,
+        "time_s": 1671.6,
+        "indiv_R2": 0.6682,
+        "ens_R2": 0.6961
+      }
+    },
+    "significance_vs_lasso": {
+      "tuned": "p<0.01",
+      "endogenous": "p<0.001"
+    },
+    "invariant_checks": {
+      "test_window_length": 562,
+      "internal_validation_length": 562,
+      "train_window_fixed": 1890,
+      "train_window_endogenous": 1000,
+      "feature_count": 1072,
+      "observation_count": 6260,
+      "calendar_rows": 6260
+    },
+    "leakage_barrier_check": "TEST intersect dom(search) = empty AND TEST intersect dom(Optuna) = empty",
+    "feature_constructibility_check": "UNRESOLVED — 403-feature remainder pending technical-indicator inventory confirmation",
+    "calendar_block_check": "OOS evaluation not executable before 2026-03-31"
+  }
+}
