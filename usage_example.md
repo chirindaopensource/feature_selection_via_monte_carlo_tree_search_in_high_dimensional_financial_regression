@@ -1540,7 +1540,7 @@ Smoke mode does not return `prepared`, so the first bundle must come from a full
 
 #### **Step 4.5: The study-scale call (not executed here)**
 
-With every default in place, the call below is the study run: Table 3's run counts and the frozen Table 2 vectors. It was **not** executed on these synthetic panels. On the real panels, the pipeline took 3,839 seconds for `fixed`, 5,161 seconds for `tuned` and 22,813 seconds for `endogenous`.
+With every default in place, the call below is the study run: Table 3's run counts and the frozen Table 2 vectors. It was **not** executed on these synthetic panels. On the real panels, before the 2026-10-31 search correction, the pipeline took 3,839 seconds for `fixed`, 5,161 seconds for `tuned` and 22,813 seconds for `endogenous`.
 
 ```python
 # Not executed in the verification: this is the study-scale call.
