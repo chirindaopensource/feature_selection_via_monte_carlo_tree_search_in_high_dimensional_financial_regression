@@ -218,7 +218,7 @@ The diagram below illustrates the Inputs, Processes and Outputs (IPOs) of the im
 
 ### Results on the real panels
 
-These figures come from full-mode runs on real Yahoo Finance, FRED and factor-library data, with the Table 2 hyperparameters and Table 3 run counts. Optuna was not re-run. The paper's numbers are comparison targets.
+These figures come from full-mode runs on real Yahoo Finance, FRED and factor-library data, with the Table 2 hyperparameters and Table 3 run counts. Optuna was not re-run. The paper's numbers are comparison targets. The raw data, run folders and helper scripts behind these figures are not published, for privacy and data-licensing reasons, so the figures cannot be re-derived from this repository alone.
 
 | Quantity | Fixed ($K = 60$) | Tuned ($K = 15$) | Endogenous |
 | --- | --- | --- | --- |
@@ -2079,14 +2079,12 @@ The study brief, `config.yaml` and the notebook disagree in a few places. The ex
 ```text
 feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression/
 ├── feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression_draft.ipynb   # the notebook: Tasks 1-36
-├── feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression_ipo_main_1.png # Inputs-Processes-Outputs diagram
+├── feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression_ipo_main_1.png to _5.png # Inputs-Processes-Outputs diagrams
 ├── config.yaml                  # study configuration, 34 top-level blocks
 ├── study_config.json            # the same configuration as JSON
 ├── requirements.txt             # pinned versions of the verified environment
 ├── usage_example.md             # the verified usage example, embedded above
-├── inputs_discussion.txt        # discussion of the study inputs
 ├── key_callables_discussion.txt # inputs, processes and outputs of the 36 task orchestrators
-├── paper_metadata.md            # title, abstract and metadata of the paper
 ├── paper_summary.md             # section-by-section summary of the paper
 ├── differences_from_paper_20261022.md # results against the paper's targets
 ├── LICENSE
