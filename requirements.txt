@@ -1,0 +1,64 @@
+# ============================================================================#
+#
+#  L0 Feature Selection via Monte Carlo Tree Search in High-Dimensional
+#  Financial Regression
+#
+#  Python dependencies of the notebook
+#  feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression_draft.ipynb,
+#  a complete, production-grade implementation of the analytical framework
+#  presented in "L0 Feature Selection via Monte Carlo Tree Search in
+#  High-Dimensional Financial Regression" by Cameron Mouangue and Tristan
+#  Cazenave (2026). All reported R-squared values are explanatory, not
+#  predictive.
+#
+#  Environment:
+#  • Python 3.13.9, as recorded in the notebook's kernel metadata
+#  • Every version below is the one installed when the usage example was
+#    verified, pinned exactly for reproducibility
+#  • Standard-library imports need no entry here
+#
+#  Installation:
+#  python -m pip install -r requirements.txt
+#
+#  Paper Reference:
+#  Mouangue, C., & Cazenave, T. (2026). L0 Feature Selection via Monte Carlo
+#  Tree Search in High-Dimensional Financial Regression. 7th ACM International
+#  Conference on AI in Finance (ICAIF '26). arXiv preprint arXiv:2610.13574v1.
+#  https://arxiv.org/abs/2610.13574v1
+#
+#  Author: CS Chirinda
+#  License: MIT
+#  Version: 1.0.0
+#
+# ============================================================================#
+
+# Numerical and data core: imported unconditionally by the notebook.
+numpy==2.3.5
+pandas==2.3.3
+scipy==1.16.3
+
+# Penalized regression baselines: import name sklearn.
+scikit-learn==1.7.2
+
+# Hyperparameter tuning (Tasks 28 and 29).
+optuna==5.0.0
+
+# Figures (Task 33).
+matplotlib==3.10.6
+
+# Market data access: imported unconditionally by the notebook.
+yfinance==1.7.0
+curl_cffi==0.16.3
+
+# Calendar oracle (Task 3): its import is guarded in the notebook, but Task 3
+# needs it unless allow_missing_calendar_oracle=True. The usage example also
+# imports it directly.
+pandas_market_calendars==5.5.0
+
+# Reads config.yaml in the usage example: import name yaml. The notebook does
+# not import it.
+PyYAML==6.0.3
+
+# Notebook execution environment.
+notebook==7.4.5
+ipykernel==6.31.0
