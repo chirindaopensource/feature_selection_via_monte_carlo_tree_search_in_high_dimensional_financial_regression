@@ -1,0 +1,547 @@
+## Key callables, Tasks 1 to 36
+
+This discussion covers the 36 final task orchestrators of `feature_selection_via_monte_carlo_tree_search_in_high_dimensional_financial_regression_draft.ipynb`, in notebook task order. Thirty-two are named `run_task_1` to `run_task_36`; the orchestrators of Tasks 17, 22, 25 and 27 are `terminal_fit_task_17`, `run_gnrpa_task_22`, `run_task_25_baselines` and `run_lasso_sparsity_stress_task_27`. Python implementation author: **CS Chirinda**. The orchestrators' signatures and documented contracts, the docstrings of the stage callables they compose, and the notebook's declared constants establish behaviour; the paper establishes the methodological standard. Internal helpers are accounted for inside their parent task rather than counted as additional callables. The notebook was not executed for this document.
+
+Notation: session $t$, adjusted NASDAQ-100 close $P_t$, feature set $\mathcal{F}=\lbrace f_1,\dots,f_p\rbrace$, subset $S$, state $s_t=(f_{\mathrm{last}},S_t)$, policy table $W$, heuristic bias $\beta$, temperature $\tau$, and $M$ ensemble runs. Paper equations are numbered as in `latex_context.txt`: (1) softmax policy; (2) policy update; (3) target; (4) $L_0$ problem; (5) action set; (6) stabilized OLS; (7) redundancy; (8) feature bias; (9) stopping bias; (10) lexicographic reward; (11) MaxVIF; (12) ensemble linearity.
+
+Data boundary: manuscript figures below are comparison targets, not results reported by this document. The Yahoo Finance inputs are not of institutional grade and stand in for Bloomberg or DataBento data. Two manuscript counts are recorded as documented discrepancies rather than enforced as failures: $T=6,260$ is not reproducible from the exchange calendars (6,600 sessions over the stated span), and $p=1,072$ cannot be constructed from the disclosed feature families. All $R^2$ figures are explanatory and contemporaneous, never predictive. Task numbers identify notebook cells, not runtime calls: Task 34 drives Tasks 1–33, and Tasks 9–23 execute inside the search stage.
+
+### Task 1 — `run_task_1`
+
+- **Inputs**: `config`, including `raw_input_schemas`; `panels`, the four ingested panels; `output_dir`.
+- **Process**: runs the schema validator, the manuscript numeric validator and the interpretive validator in that order. Step 1 writes `schema_audit_<stamp>.json` and raises on a structural failure; Steps 2 and 3 never raise.
+- **Outputs**: `status`, `stamp`, `schema`, `numeric_domain`, `interpretive`, `artifact_path`.
+- **Transformation**: raw panels and the configuration become a merged audit whose status is the maximum severity over `pass < warn < fail`. The file `task_1_audit_<stamp>.json` is written and re-read before any Step 2 or 3 failure is raised.
+- **Research role**: guards the paper's Section 3.1 task definition, its Section 4.1 partition and the Table 2 and Equation (6) constants before any computation.
+- **Equations**: the stabilizer of Equation (6) and the partition invariants that are checked:
+
+$$
+\lambda=10^{-5},\qquad \mathrm{split}=2023\text{-}12\text{-}31,\qquad V=562,\qquad T_{\mathrm{test}}=562,\qquad W\in\lbrace1890,1890,1000\rbrace.
+$$
+
+- **Implementation distinction**: both stamps equal the maximum `source_fetched_at_utc` across the panels, so artifact names are deterministic. A persisted status that differs from the merged status raises `RuntimeError`.
+
+### Task 2 — `run_task_2`
+
+- **Inputs**: `calendar`, `yahoo_panels`, `fred_panel`, `factor_panel`, `config`, `output_dir`.
+- **Process**: resolves the FRED fill policy, the release-lag table and the burn-in once, into a private copy of the preprocessing block. It then prunes the panels, audits missing values and builds the value-domain report.
+- **Outputs**: `pruned`, `audited`, `value_domain`, `status` (`pass`, `log` or `fail`).
+- **Transformation**: duplicates are removed (the open row is retained) and session existence is enforced. Missing values are audited under `forward_fill_after_release_lag`, and numeric columns are fingerprinted without clipping.
+- **Research role**: implements the Section 3.1 data discipline for market, macroeconomic and factor sources.
+- **Equations**: a FRED value for series $j$ with release lag $\ell_j$ becomes visible only from its availability date:
+
+$$
+\tau_{j}(d)=d+\ell_j,\qquad x_{j,t}\ \text{visible at}\ t\iff\tau_j(d)\le t.
+$$
+
+- **Implementation distinction**: this stage reports on the native, unreindexed FRED and factor frames. The as-of join and the post-join NaN abort belong to Task 7. Winsorization must be `None`, because Step 3 is a report, not an intervention.
+
+### Task 3 — `run_task_3`
+
+- **Inputs**: `calendar_df`, `config`, `output_dir`; optional `external_sessions`, `short_sessions`; `allow_missing_oracle` defaults to false.
+- **Process**: resolves the calendar block, derives the NASDAQ, NYSE and CBOE oracle union once when none is supplied, then runs the external, half-day and cardinality verifiers. The report is written before any blocker is raised.
+- **Outputs**: `external`, `half_day`, `cardinality`, `report_path`.
+- **Transformation**: an ingested calendar becomes a verified session set with one-sided differences, half-day relations and disputed dates.
+- **Research role**: supports the Section 3.1 sample of daily sessions from January 2000 to March 2026 on one coherent timestamp index.
+- **Equations**: the external set is a union, not an intersection, and half-days must be a subset of open sessions:
+
+$$
+S_{\mathrm{ext}}=S_{\mathrm{NASDAQ}}\cup S_{\mathrm{NYSE}}\cup S_{\mathrm{CBOE}},\qquad \mathcal{H}\subseteq\mathcal{O}.
+$$
+
+- **Implementation distinction**: external disagreement is a warning. A count different from $T$ is recorded in `t_discrepancy`, not treated as a blocker; other cardinality blockers still raise after the report is on disk.
+
+### Task 4 — `run_task_4`
+
+- **Inputs**: `close_adjusted`, `study_config`; optional `raw_adjustment_flag`.
+- **Process**: reads the configuration, computes daily simple returns, forms the five-session additive target, then drops the target burn-in and records the survivor range.
+- **Outputs**: `returns`, `target`, `target_estimation`, `return_diagnostics`, `burn_in_log`, `target_summary`, `audit`, `effective_calendar_burn_in`, `first_survivor_label`.
+- **Transformation**: an adjusted price series becomes the response $Y_t$ on integer session labels. The first return is never back-filled.
+- **Research role**: implements Equation (3), the contemporaneous weekly return of the NASDAQ-100.
+- **Equations**:
+
+$$
+r_t=\frac{P_t-P_{t-1}}{P_{t-1}},\qquad Y_t=\sum_{k=0}^{4}r_{t-k}.
+$$
+
+- **Implementation distinction**: the declared `burn_in_rows` is four incomplete target rows; the effective calendar burn-in is five, because $r_0$ is undefined. Both counts are asserted and audited.
+
+### Task 5 — `run_task_5`
+
+- **Inputs**: `base_series_panel`, `calendar`, `config`.
+- **Process**: builds the base-operator, transform and technical-indicator blocks, aligns each to the calendar, concatenates them in stage order, and verifies declared counts and all fifteen Table 4 exemplars.
+- **Outputs**: the feature `DataFrame`, with realised counts and exemplars in `attrs['feature_audit']`.
+- **Transformation**: base series become 25 operators per series (level, difference, three rolling statistics per window, and lagged level and difference per offset), 28 interactions, squared constructs and lagged operators, plus indicators.
+- **Research role**: constructs the Section 3.1 feature universe over the declared lookback windows.
+- **Equations**: each rolling statistic requires a full window, $\mathcal{W}=\lbrace5,21,63,126,252\rbrace$, and the manuscript's count decomposes as:
+
+$$
+\bar x_{t}^{(w)}=\frac{1}{w}\sum_{k=0}^{w-1}x_{t-k},\quad w\in\mathcal{W},\qquad 1072=425+133+111+403.
+$$
+
+- **Implementation distinction**: the 403-feature remainder is unspecified by the manuscript. An indicator shortfall is reported per family, not raised; Task 6 closes it. The target-window barrier lags the NDX and MKT base series by $h$ sessions before construction.
+
+### Task 6 — `run_task_6`
+
+- **Inputs**: `feature_frame`; optional `inventory`, `config`, `output_dir`, `base_series_panel`, `allow_feature_shortfall`.
+- **Process**: applies the leakage filter, reconciles the survivors against $p$ including one extension loop, then verifies the naming grammar.
+- **Outputs**: `leakage`, `reconciliation`, `naming`, `surviving_features`, `column_count`, `feature_frame`, `inventory`, `inventory_source`, `status`, `residual_shortfall`, `shortfall_documented`, `extension_applied`, `p_discrepancy`.
+- **Transformation**: the constructed pool becomes the audited universe. If it falls short, extension columns are built once by Task 5 and the filter and reconciliation are re-run.
+- **Research role**: enforces the Section 3.1 exclusion of NDX-derived indicators with lookbacks under five sessions, while exogenous variables stay at time $t$.
+- **Equations**: the filter, and the barrier's target window, where the feature must not depend on any return in $\mathcal{W}_t$:
+
+$$
+\mathrm{drop}(f)\iff f\ \text{is NDX-derived}\ \wedge\ \mathrm{lookback}(f)<5,\qquad \mathcal{W}_t=\lbrace t-h+1,\dots,t\rbrace.
+$$
+
+- **Implementation distinction**: a residual shortfall is `SHORTFALL_DOCUMENTED`, with `p_discrepancy` recorded, and the pipeline continues unless `allow_feature_shortfall=False`. The barrier audit is a separate callable, `audit_information_barrier_task_6`.
+
+### Task 7 — `run_task_7`
+
+- **Inputs**: `fred_panel`, `factor_panel`, `calendar`, `engineered_features`, `feature_universe`, `target`, `target_burn_in`, `config`, `output_dir`.
+- **Process**: runs release-lag macro alignment and backward as-of factor alignment for their audits, then assembles $X$ and $Y$ and writes the alignment audit.
+- **Outputs**: `design_matrix`, `target`, `macro_aligned`, `factor_aligned`, `calendar`, `audit`.
+- **Transformation**: engineered features and the target become one aligned finite pair on a trimmed calendar.
+- **Research role**: implements the deliberate contemporaneous alignment of Section 3.1, which the paper ties to same-day volatility, credit and equity co-movement.
+- **Equations**: the assembled matrix and the burn-in decomposition:
+
+$$
+X\in\mathbb{R}^{T\times p},\qquad b=\max(b_X,b_Y).
+$$
+
+- **Implementation distinction**: in the orchestrated pipeline the aligned series are consumed upstream by Task 5, so Steps 1 and 2 here re-derive them deterministically. The default factor fill tolerance is five sessions.
+
+### Task 8 — `run_task_8`
+
+- **Inputs**: `design_matrix`, `config`; optional `calendar`, `output_dir`.
+- **Process**: splits by date, builds the validation and training windows for each configuration, builds the walk-forward folds and the fold factory, and checks every post-condition.
+- **Outputs**: `partition`, `search_environment`, `folds`, `folds_by_configuration`, `fold_factory`, `fold_assumption`, `calendar_slices`.
+- **Transformation**: one matrix becomes pre-2024 and test blocks, three training and validation pairs, and pairwise-disjoint folds.
+- **Research role**: implements Section 4.1: a 562-session test block, a 562-session validation window immediately before it, and three non-overlapping pre-2024 folds.
+- **Equations**: with test start $t_0$, validation length $V=562$ and training width $W_c$:
+
+$$
+\mathcal{V}=[t_0-V,t_0),\qquad \mathcal{T}_c=[t_0-V-W_c,t_0-V),\qquad W_c\in\lbrace1890,1890,1000\rbrace.
+$$
+
+- **Implementation distinction**: the fold placement is a documented interpretation of "non-overlapping", recorded in `fold_assumption`. The factory rebuilds training starts for a trial window while the validation boundaries stay frozen.
+
+### Task 9 — `run_task_9`
+
+- **Inputs**: `p`, `K_max`, `max_steps`, `evaluate_r2`, `evaluate_vif`; keyword `action_sampler`.
+- **Process**: starts at the empty state and records every state and action, checking capacity and stop before each sampler call.
+- **Outputs**: `states`, `actions`, `terminal`, `reward`.
+- **Transformation**: a sampler and two evaluators become one recorded episode. The reward is formed only at a terminal state.
+- **Research role**: implements the Section 3.2 episodic MDP over $(\mathcal{S},\mathcal{A},\mathcal{R})$.
+- **Equations**: the initial state, Equation (5), the transition and Equation (10):
+
+$$
+s_0=(\varnothing,\varnothing),\qquad \mathcal{A}(s_t)=(\mathcal{F}\setminus S_t)\cup\lbrace a_{\mathrm{stop}}\rbrace,\qquad S_{t+1}=S_t\cup\lbrace a\rbrace,\qquad f_{\mathrm{last}}=a.
+$$
+
+- **Implementation distinction**: the stop action is the sentinel index $p$. Without a sampler, the deterministic reference rule takes the smallest available feature; that is a module contract, not the search policy.
+
+### Task 10 — `run_task_10`
+
+- **Inputs**: `p`, `config`, `heuristic_scores`, `beta`, `tau`.
+- **Process**: allocates the table, zeroes it with `zero_uniform`, round-trips the boundary indices $\lbrace0,p-1,p\rbrace$, and evaluates the entropy of Equation (1) at the empty-state row.
+- **Outputs**: `policy_table`, `shape`, `dtype`, `nbytes`, `init_seconds`, `initial_entropy`, `empty_state_row`, `initialization`, `verified`.
+- **Transformation**: a universe size becomes an audited zero table of float64 weights.
+- **Research role**: provides the policy matrix of Section 3.2 that captures pairwise feature synergies.
+- **Equations**: with $W=0$ the initial policy reduces to the bias alone, so its entropy does not depend on $\tau$:
+
+$$
+W\in\mathbb{R}^{(p+1)\times(p+1)},\qquad \pi_0(a\mid s)=\frac{\exp(\beta_{s,a})}{\sum_{j}\exp(\beta_{s,a_j})},\qquad H_0=-\sum_a\pi_0(a\mid s)\ln\pi_0(a\mid s).
+$$
+
+- **Implementation distinction**: the paper describes a $p\times p$ matrix. The extra row is the empty state and the extra column is the stop action. Zero initialization is a study placeholder, not a manuscript statement.
+
+### Task 11 — `run_task_11`
+
+- **Inputs**: `X_train`, `y_train`, `feature_names`, `config`; optional `window_spec`, `epsilon`, `cache`, `fold_id`, `fold_train_end`, `validation_start`.
+- **Process**: resolves the half-open estimation window, slices the matrices, computes relevance, and caches results under window-identifying keys.
+- **Outputs**: the resolver fields, `relevance`, `zero_variance_mask`, `zero_variance_features`, `zero_variance_relevance`, `cache_key`, `cache_hit`, the fold fields, and both cache keys.
+- **Transformation**: a training design and target become one absolute-correlation vector of length $p$.
+- **Research role**: implements the relevance term of the Section 3.3 mRMR heuristic.
+- **Equations**: on the estimation rows, with centred columns:
+
+$$
+\mathrm{Rel}(f_i)=|\rho(f_i,Y)|=\frac{\left|\sum_t(x_{it}-\bar x_i)(y_t-\bar y)\right|}{\lVert x_i-\bar x_i\rVert_2\,\lVert y-\bar y\rVert_2}.
+$$
+
+- **Implementation distinction**: the paper leaves the correlation window open, so it is an explicit specification. In a fold context the window may not cross `fold_train_end` or `validation_start`, and the fold identifier enters the cache keys. Columns with standard deviation below `epsilon` receive relevance zero.
+
+### Task 12 — `run_task_12`
+
+- **Inputs**: `design_matrix`, `selected`; optional `candidates`, `configuration`, `k`, `window`, `correlation_matrix`.
+- **Process**: resolves the variant, computes or accepts the correlation cache, then evaluates redundancy for each candidate.
+- **Outputs**: `redundancy`, `variant`, `k`, `window`, `feature_names`, `correlation_matrix`, `masked_columns`.
+- **Transformation**: a correlation matrix and a subset become one redundancy score per candidate.
+- **Research role**: implements Equation (7) and the three metrics of Section 3.3 (fixed: mean; tuned: rms; endogenous: top-3-rms).
+- **Equations**: with $c_{(m)}$ the $m$-th largest element of $\lbrace|\rho(f_i,f_j)|:f_j\in S\rbrace$:
+
+$$
+\mathrm{Red}_{\mathrm{top}\text{-}k\text{-rms}}(f_i,S)=\left(\frac{1}{\min(k,|S|)}\sum_{m=1}^{\min(k,|S|)}c_{(m)}^2\right)^{1/2}.
+$$
+
+- **Implementation distinction**: `mean` averages $c_{(m)}^2$ with no root, as the paper states. An empty subset returns exactly 0.0. Numerically constant columns have their correlations set to zero and are listed in `masked_columns`.
+
+### Task 13 — `run_task_13`
+
+- **Inputs**: `relevance`, `selected`, `redundancy`, `config`; optional `configuration`, `policy_row`.
+- **Process**: resolves $\gamma$, $\beta_{\mathrm{mag}}$ and $\tau$ for the Table 2 column, computes the bias, guards finiteness, and computes a softmax and the identification record.
+- **Outputs**: `bias`, `complement_index`, `softmax_probabilities`, `beta_temperature_ratio`, `gamma`, `beta_mag`, `tau`, `configuration`, `parameter_sources`, `softmax_role`, `ratio_role`, `ratio_is_identified`, `identification`.
+- **Transformation**: relevance and redundancy vectors become one additive bias over the ascending complement of $S$.
+- **Research role**: implements Equation (8), the heuristic prior inside the GNRPA bias.
+- **Equations**:
+
+$$
+\beta(f_i\mid S)=\beta_{\mathrm{mag}}\left[\gamma\,\mathrm{Rel}(f_i)-(1-\gamma)\,\mathrm{Red}(f_i,S)\right].
+$$
+
+- **Implementation distinction**: without `policy_row` the distribution is the heuristic prior, with $W=0$. Under Equation (1) only the weights are divided by $\tau$, so $\beta_{\mathrm{mag}}$ and $\tau$ are not identified through their ratio; `ratio_is_identified` is always false and the ratio is a diagnostic.
+
+### Task 14 — `run_task_14`
+
+- **Inputs**: `config`, `s_sizes`; optional `configuration_name`, `output_dir`.
+- **Process**: resolves the Equation (9) block, evaluates the dispatched bias at each size, audits monotonicity on its grid, and audits the sentinel.
+- **Outputs**: `has_fixed_cardinality`, `s_sizes`, `stop_biases`, `masked`, `monotone`, `grid`, `effective_capacity`, `sentinel`, `configuration_name`.
+- **Transformation**: subset sizes become stopping biases and an effective rollout capacity.
+- **Research role**: implements Equation (9), the endogenous stopping mechanism of Section 3.4.
+- **Equations**:
+
+$$
+\beta(a_{\mathrm{stop}}\mid S)=\begin{cases}-\infty,&|S|<K_{\min}\\ \beta_{\mathrm{mag}}\,\gamma\,\beta_{\mathrm{stop}}\left(\dfrac{|S|-K_{\min}}{\max(1,K_{\max}-|S|)}\right)^{3/2},&|S|\ge K_{\min}.\end{cases}
+$$
+
+- **Implementation distinction**: $-\infty$ is the finite sentinel $-10^{30}$, audited to underflow to zero probability. The paper does not specify how fixed cardinality is enforced, so fixed and tuned runs use the placeholder hard mask $K_{\min}=K_{\max}=K$, with bias 0.0 at $|S|=K$.
+
+### Task 15 — `run_task_15`
+
+- **Inputs**: `policy_row`, `bias_vector`, `selected_features`, `n_features`, `temperature`, `rng`.
+- **Process**: builds the legal mask, computes the softmax over legal actions, and draws one categorical action.
+- **Outputs**: `mask`, `probabilities`, `action`, `action_probability`.
+- **Transformation**: one policy row and bias vector become a normalised distribution and one action.
+- **Research role**: implements the sampling line of Algorithm 1's rollout under Equations (1) and (5).
+- **Equations**:
+
+$$
+\pi(a_k\mid s)=\frac{\exp\left(\dfrac{w_{s,a_k}}{\tau}+\beta_{s,a_k}\right)}{\sum_{a_j\in\mathcal{A}(s)}\exp\left(\dfrac{w_{s,a_j}}{\tau}+\beta_{s,a_j}\right)}.
+$$
+
+- **Implementation distinction**: illegal positions are exactly zero and the stop action is always in the mask. The paper's figure says Gibbs sampling; the operation here is a single categorical draw, not a joint-conditional scheme.
+
+### Task 16 — `run_task_16`
+
+- **Inputs**: `feature_count`, `k_max`, `sample_action`, `evaluate_subset`; keyword `k_min`.
+- **Process**: initialises the empty state, expands with the injected sampler until the stop action or capacity, and evaluates the complete terminal subset once.
+- **Outputs**: `RolloutResultTask16`: the terminal state, trajectory, evaluator payload, terminal action and exit reason.
+- **Transformation**: a sampling policy becomes one validated episode and its reward.
+- **Research role**: implements the Rollout function of Algorithm 1.
+- **Equations**: the loop runs while the stop action is unselected and capacity remains, then returns the terminal evaluation:
+
+$$
+\text{while}\ a\ne a_{\mathrm{stop}}\ \wedge\ |S|<K_{\max}:\quad a\sim\pi(\cdot\mid s),\quad s\leftarrow s\cup\lbrace a\rbrace;\qquad \text{return}\ \bigl(s,\mathcal{R}(S)\bigr).
+$$
+
+- **Implementation distinction**: the orchestrator never substitutes its own sampler. It proves that actions were legal, that the subset equals the union of feature actions, and that the exit reason agrees with $K_{\max}$.
+
+### Task 17 — `terminal_fit_task_17`
+
+- **Inputs**: `X_train`, `Y_train`, `subset_indices`; optional `stabilizer`, `condition_number_threshold`.
+- **Process**: extracts the columns in ascending universe order, forms the normal-equation terms, and solves the stabilized system.
+- **Outputs**: a dictionary of coefficients with the extraction and solve diagnostics.
+- **Transformation**: a subset and training data become an unshrunk coefficient vector.
+- **Research role**: implements the Section 3.2 estimator of Equation (6), which subset selection in Equation (4) wraps.
+- **Equations**:
+
+$$
+\hat\theta_S=\left(X_{\mathrm{train},S}^\top X_{\mathrm{train},S}+\lambda I\right)^{-1}X_{\mathrm{train},S}^\top Y_{\mathrm{train}},\qquad \lambda=10^{-5}.
+$$
+
+- **Implementation distinction**: $\lambda$ is a numerical device, not a statistical penalty, and there is no intercept. A condition number above $10^{12}$ is the warning threshold. A separate pseudoinverse kernel provides the minimum-norm solution.
+
+### Task 18 — `run_task_18`
+
+- **Inputs**: `X_train`, `X_val`, `y_val`, `feature_indices`, `theta_hat_S`, `study_config`.
+- **Process**: sorts the subset once, permutes the coefficients identically, checks the column labels against training, predicts, scores, and summarises the distribution.
+- **Outputs**: `predictions`, `r_squared`, `ss_res`, `ss_tot`, `score_dataset`, `r2_summary`, `subset_indices`, `theta_hat_S`.
+- **Transformation**: terminal coefficients become a validation $R^2$ with an auditable column-to-coefficient pairing.
+- **Research role**: implements the primary criterion of the terminal reward in Sections 3.2 and 3.4.
+- **Equations**: the denominator uses the validation sample's own mean:
+
+$$
+\hat y_{\mathrm{val}}=X_{\mathrm{val},S}\hat\theta_S,\qquad R^2_{\mathrm{val}}=1-\frac{\sum_t(y_t-\hat y_t)^2}{\sum_t(y_t-\bar y_{\mathrm{val}})^2}.
+$$
+
+- **Implementation distinction**: negative values are never clipped. A zero-variance target returns $-\infty$, which is excluded from the summary; `eq6_fit.score_dataset` must equal `internal_validation_562_days`.
+
+### Task 19 — `run_task_19`
+
+- **Inputs**: `X_val_sub`; optional `correlation_matrix_fit_on`, `singular_handling`, `singular_condition_threshold`.
+- **Process**: validates the two placeholders, then computes the subset correlation matrix and its maximum inverse diagonal with size guards.
+- **Outputs**: the compute-stage audit record, including `max_vif` and `raw_max_diagonal`.
+- **Transformation**: a validation submatrix becomes one collinearity diagnostic.
+- **Research role**: implements Equation (11), the tie-breaking criterion of Section 3.4.
+- **Equations**:
+
+$$
+\mathrm{MaxVIF}(S)=\max_{1\le j\le|S|}\left(C_S^{-1}\right)_{jj}.
+$$
+
+- **Implementation distinction**: the paper does not fix the correlation sample, so `validation_subset` is a declared placeholder. Above a condition number of $10^{12}$ the Moore–Penrose pseudoinverse replaces the inverse. An empty subset returns zero diagnostics, and a negative diagonal is flagged.
+
+### Task 20 — `run_task_20`
+
+- **Inputs**: `candidates`, `output_dir`.
+- **Process**: quantizes each primary key, forms each reward tuple, ranks the candidates and writes `reward_log.json`.
+- **Outputs**: `records`, `ranking`, `best_index`, `best_reward`.
+- **Transformation**: raw scores become ordered tuples, and rounding creates the ties that allow the later criteria to act.
+- **Research role**: implements Equation (10), which orders accuracy, sparsity and collinearity without any weighted trade-off.
+- **Equations**:
+
+$$
+\mathcal{R}(S)=\left(\lfloor R^2_{\mathrm{val}}(S)\rceil_3,\ -|S|,\ -\mathrm{MaxVIF}(S)\right).
+$$
+
+- **Implementation distinction**: rounding is half away from zero on the exact decimal representation, so binary floating-point artefacts cannot move a tie. The comparison is strict: equality and worsening both return false.
+
+### Task 21 — `run_task_21`
+
+- **Inputs**: `policy_weights`, `trajectory`, `config`, `level`, `tau`.
+- **Process**: validates the table, routes $\alpha$ by recursion level, and replays the retained sequence once, recomputing Equation (1) at each state under the current table.
+- **Outputs**: `policy_weights`, `n_updates`, `alpha`, `step_size`, `policies`, `level`, `configuration`, `tau`, `applied_state_keys`.
+- **Transformation**: a retained trajectory becomes an updated policy table, with no value function or temporal-difference term.
+- **Research role**: implements Equation (2) and the dual learning rates of Section 3.4 (for the endogenous row, 0.177 and 2.212).
+- **Equations**:
+
+$$
+w_{s,a_j}\leftarrow w_{s,a_j}-\frac{\alpha}{\tau}\left(\pi(a_j\mid s)-\mathbb{I}_{\lbrace a_j=a^*\rbrace}\right),\qquad \alpha=\begin{cases}\alpha_{L1},&L=1\\ \alpha_{\mathrm{high}},&L>1.\end{cases}
+$$
+
+- **Implementation distinction**: only legal actions are updated, and illegal columns must stay byte-identical. Consecutive records with the same `state_key` are de-duplicated. The best action's weight must strictly increase whenever its probability is below one.
+
+### Task 22 — `run_gnrpa_task_22`
+
+- **Inputs**: `state`, `policy`, `config`, `rollout_fn`; optional `iteration_log`.
+- **Process**: resolves and validates the Table 2 triple, patience, learning rates and temperature in a private configuration copy, enters the recursion at $L_{\mathrm{top}}=3$, and checks the return signature.
+- **Outputs**: a tuple of the best sequence, a list of (state, action) pairs, and the length-three lexicographic reward.
+- **Transformation**: a root state and the shared table become the best trajectory; deeper levels filter trajectories before any update.
+- **Research role**: implements Algorithm 1, GNRPA with endogenous stopping.
+- **Equations**: at each level $L\ge1$, with the update of Equation (2) applied toward the retained best sequence:
+
+$$
+(\mathrm{seq},\mathrm{score})\leftarrow\mathrm{GNRPA}(L-1,s,W),\qquad \text{break if}\ (L=1\wedge\mathrm{no\_improve}\ge P)\ \text{or}\ (L>1\wedge n\ge I_L).
+$$
+
+- **Implementation distinction**: the table is updated in place and shared across levels. The wrapper draws no random variates, so the injected rollout is the only stochastic component.
+
+### Task 23 — `run_task_23`
+
+- **Inputs**: `configuration`, `level_reward_traces`, `patience`, `output_dir`; keyword `level1_hard_cap`, `iteration_log`.
+- **Process**: drives the root loop iteration by iteration through the live break predicate, runs each deeper level to its budget, measures per-level time, and audits a Task 22 log when supplied.
+- **Outputs**: an audit with `configuration`, `patience`, `iteration_budgets`, `level1_iterations`, `level1_final_no_improve`, `levels`, `timing_seconds` and diagnostics.
+- **Transformation**: reward traces become a verified termination record.
+- **Research role**: implements the Section 3.4 patience rule, which makes $I_1$ variable, and the budgets of Table 2.
+- **Equations**: strict lexicographic improvement resets the counter; ties and worsening increment it:
+
+$$
+\mathrm{no\_improve}\leftarrow\begin{cases}0,&\mathrm{score}>\mathrm{best\_score}\\ \mathrm{no\_improve}+1,&\text{otherwise.}\end{cases}
+$$
+
+- **Implementation distinction**: budgets are $84\times3\times6$, $18\times28\times18$ and var. $\times30\times15$, with $P=63$ for the endogenous row. Table 2 gives fixed and tuned no patience, so their root loops use $I_1$. An explicit hard cap is always enforced.
+
+### Task 24 — `run_task_24`
+
+- **Inputs**: `output_directory`; optional `configuration_names`.
+- **Process**: instantiates each named Table 2 row, verifies every parameter against its declared literal, constructs each record twice, verifies the dual-alpha router, and writes the audit.
+- **Outputs**: `configurations`, `audit_path`, `manuscript_targets`, `alpha_routing`.
+- **Transformation**: declared literals become frozen records. No field depends on data or on a random draw.
+- **Research role**: implements Table 2's three operating points, where fixed and tuned are the special case $\alpha_{L1}=\alpha_{\mathrm{high}}$.
+- **Equations**: the operating points $(\gamma,\beta_{\mathrm{mag}},\tau)$ with the learning rates:
+
+$$
+(0.666,24.82,1.520),\ \alpha=1.514;\quad(0.772,14.97,0.868),\ \alpha=2.003;\quad(0.811,13.72,1.515),\ (\alpha_{L1},\alpha_{\mathrm{high}})=(0.177,2.212).
+$$
+
+- **Implementation distinction**: published best CV values (0.7089, 0.7491, 0.7607) sit in a separate `manuscript_targets` section, so a configuration cannot be mistaken for a result.
+
+### Task 25 — `run_task_25_baselines`
+
+- **Inputs**: `X_train`, `y_train`, `X_test`, `y_test`, `config`, `output_dir`; optional `training_index`, `gnrpa_training_index`, `folds`, `X_history`, `y_history`, `validation_length`, `strict_convergence`.
+- **Process**: resolves the baseline blocks, verifies that training rows equal the GNRPA window, fits Ridge, Lasso and the configured Elastic Net with one intercept convention, times each fit, and writes the audit.
+- **Outputs**: `ridge_L2`, `lasso_L1`, optional `elastic_net`, `intercept_convention`, `training_rows`, `test_rows`, `feature_count`, `audit`, `output_path`.
+- **Transformation**: one training window becomes three penalized models scored on the held-out test block.
+- **Research role**: implements the Section 4.1 convex baselines (targets: Ridge 0.5250; Lasso 0.6313 with 60 features at $\lambda=0.0745$; Elastic Net 0.6243 with 55 features).
+- **Equations**: the Lasso objective and the Ridge objective, with both solved around training means:
+
+$$
+\min_{\beta}\frac{1}{2n}\lVert y_c-X_c\beta\rVert_2^2+\lambda\lVert\beta\rVert_1,\qquad \min_{b_0,b}\lVert y-b_0-Xb\rVert_2^2+\alpha\lVert b\rVert_2^2.
+$$
+
+- **Implementation distinction**: Equation (6) does not apply here, and these baselines carry an intercept. The paper does not specify scaling, so `baselines.standardization` selects it; with `training_window_z_score` the training moments alone are used and coefficients are reported in raw units.
+
+### Task 26 — `run_task_26`
+
+- **Inputs**: `X`, `y`, `train_idx`, `test_idx`, `folds`, `feature_names`, `max_features`, `output_dir`; optional `convex_baseline_runtime_s`.
+- **Process**: validates the design, grows the path by cross-validation, truncates it at the stopping point, evaluates out of sample, and writes the audit.
+- **Outputs**: `selected_indices`, `selected_names`, `n_features`, `stopping_k`, `oos_r2`, `runtime_s`, `audit_path`.
+- **Transformation**: a candidate pool becomes one additive path, without joint re-optimization.
+- **Research role**: implements the greedy $L_0$ baseline of Section 4.1 (target: stopping at $K=5$ with OOS $R^2$ of 0.2489).
+- **Equations**: each step adds the feature with the largest training RSS reduction:
+
+$$
+j_{k+1}=\arg\min_{j\notin S_k}\mathrm{RSS}\left(S_k\cup\lbrace j\rbrace\right).
+$$
+
+- **Implementation distinction**: each candidate is refitted by OLS with an intercept, and no feature is removed. The stopping point is the 1-based count at the last improving step.
+
+### Task 27 — `run_lasso_sparsity_stress_task_27`
+
+- **Inputs**: `X_train`, `y_train`, `X_test`, `y_test`, `config`; keyword `gnrpa_mean_individual_r2`, `artifact_dir`, optional `feature_names`.
+- **Process**: validates the block, verifies the monotone count screen and bisects the penalty, refits, evaluates on the test window, interprets the result against the configured band, and computes the shrinkage cost.
+- **Outputs**: `lambda`, `n_features`, `selected_features`, `selected_feature_names`, `shrinkage_cost_vs_register`, `grid`, `coefficients`, `intercept`, `oos_r2`, `oos_r2_status`, `shrinkage_cost`, `gnrpa_mean_individual_r2`, `artifact_path`, plus metadata.
+- **Transformation**: a raised penalty produces a matched-sparsity Lasso and a scalar cost.
+- **Research role**: implements the Section 4.1 stress test: forcing 14–16 features reduces OOS $R^2$ to 0.39–0.43, against 0.6648 for GNRPA.
+- **Equations**:
+
+$$
+\lambda^\dagger:\ 14\le\lVert\hat\beta(\lambda^\dagger)\rVert_0\le16,\qquad \mathrm{cost}=R^2_{\mathrm{GNRPA}}-R^2_{\mathrm{Lasso}}(\lambda^\dagger).
+$$
+
+- **Implementation distinction**: monotonicity is checked on a coarse geometric ladder, not assumed; a non-monotone screen falls back to a dense scan. The interpretation band has a 0.02 warning margin.
+
+### Task 28 — `run_task_28`
+
+- **Inputs**: `config`, `folds`, `pipeline`, `output_dir`; optional `configuration_name`.
+- **Process**: resolves the name and trial budget, builds the seeded `TPESampler` and the `MedianPruner`, maximises the mean validation coefficient over exactly three folds, and writes one audit line per trial.
+- **Outputs**: `study`, `best_params`, `best_value`, `fold_scores`, `best_trial_number`, `audit_path`, `search_audit_path`, `n_trials`, `budget`, `configuration`, `search_space_source`, `pruning`.
+- **Transformation**: a search space and folds become a best hyperparameter vector with per-fold evidence.
+- **Research role**: implements the outer tuning objective of Sections 4.1 and 4.3.
+- **Equations**:
+
+$$
+\eta^*=\arg\max_{\eta}\frac{1}{3}\sum_{k=1}^{3}R^2_{\mathrm{val},k}(\eta).
+$$
+
+- **Implementation distinction**: a fold's `test` entry is never read. The pruner is a no-op, because no intermediate value is reported. $\beta_{\mathrm{mag}}$ and $\tau$ are tuned separately, following Equation (1).
+
+### Task 29 — `run_task_29`
+
+- **Inputs**: `config`, `configuration`, `design`, `response`, `folds`, `audit_dir`, `test_window`; optional `reduced_budget`, `seed`, `fold_factory`, `search_fn`, `verify_determinism`.
+- **Process**: allocates the budget, builds the study, runs the full GNRPA search on each fold of each trial under a test-window guard, logs each trial, retrieves the best vector from the log, and compares it with Table 2.
+- **Outputs**: `configuration`, `budget`, `trials`, `study_state`, `best`, `audit_path`, `table2_comparison`, `determinism`.
+- **Transformation**: trials become an audited best vector, with each trial nesting complete stochastic searches.
+- **Research role**: implements the Section 4.3 tuning runs (15, 50 and 20 trials; targets 0.7089, 0.7491, 0.7607).
+- **Equations**: the guard rejects any fold interval that intersects the test window, and seeds are structured by trial $u$ and fold $k$:
+
+$$
+\max(\mathrm{start},t_0)<\min(\mathrm{stop},t_1)\Rightarrow\text{reject},\qquad \mathrm{seed}_{u,k}=\mathrm{seed}+1000u+k.
+$$
+
+- **Implementation distinction**: the Table 2 comparison uses a 5% relative tolerance and records discrepancies rather than raising. The paper attributes the gap between CV and test $R^2$ to the optimizer's curse, not to leakage, and that note is carried through.
+
+### Task 30 — `run_task_30`
+
+- **Inputs**: `search_once`, `X_train`, `y_train`, `X_val`, `y_val`, `config`, `n_runs`, `output_dir`; optional `configuration_name`, `configuration_record`, `halt_on_stabilization`, `max_extra_batches`.
+- **Process**: builds the frozen vector, plans batches of the configured size (six in the paper) with consecutive seeds, runs them, fuses cumulatively, and verifies the linearity identity for each cumulative ensemble.
+- **Outputs**: the frozen hyperparameters and source, runs, batches, `batch_validation_r2`, `running_validation_r2`, stabilization fields, fusion and audit path.
+- **Transformation**: run vectors are embedded in $\mathbb{R}^p$ with zeros off their supports and averaged into one coefficient vector.
+- **Research role**: implements Equation (12), soft voting that remains a single linear equation and so preserves attribution (Section 4.4).
+- **Equations**:
+
+$$
+\hat y_{\mathrm{ens}}=\frac{1}{M}\sum_{m=1}^{M}X\hat\theta^{(m)}=X\left(\frac{1}{M}\sum_{m=1}^{M}\hat\theta^{(m)}\right)=X\theta^*.
+$$
+
+- **Implementation distinction**: batches continue until both the stabilization rule (change below 0.01 across consecutive batches) and the Table 3 count (18, 18, 12) are met, unless `halt_on_stabilization` is set. Only the seed varies between runs.
+
+### Task 31 — `run_task_31`
+
+- **Inputs**: `X_test`, `y_test`; optional `frozen_state`, `per_run_models`, `audit_path` (required in practice); keyword `theta`, `support`, `hyperparameters`, `ensemble_composition`, `ensemble_result`, `configuration_record`.
+- **Process**: freezes or validates the state with digests before any test prediction, predicts, decomposes the coefficient, and scores each reduced run model.
+- **Outputs**: `frozen`, `frozen_by`, `predictions`, `oos`, `per_run`, `headline_oos_r2`, `n_test`, `audit_path`.
+- **Transformation**: a frozen $\theta^*$ becomes the headline OOS coefficient and its per-run dispersion.
+- **Research role**: implements the Section 4.1 evaluation on the 562-session hold-out (targets: ensembles 0.6855, 0.6908, 0.6961).
+- **Equations**: the variance normalisation uses the test sample itself:
+
+$$
+\hat y_{\mathrm{test}}=X_{\mathrm{test}}\theta^*,\qquad R^2_{\mathrm{OOS}}=1-\frac{\sum_t(y_t-\hat y_t)^2}{\sum_t(y_t-\bar y_{\mathrm{test}})^2}.
+$$
+
+- **Implementation distinction**: a tampered state fails digest verification, using `hmac.compare_digest`, and the stored coefficient array is read-only.
+
+### Task 32 — `run_task_32`
+
+- **Inputs**: `run_oos_r2_vector`, `output_dir`; optional `lasso_baseline`, `search_budget_seconds`, `reference_std`, `alternative`, `tuned_run_oos_r2_vector`, `benchmark_provenance`.
+- **Process**: runs the one-sample test, the dispersion summary and the strict minimum comparison, combines the two headline checks, and writes every number's provenance.
+- **Outputs**: `ttest`, `dispersion`, `baseline_comparison`, `audit_path`, `all_checks_passed`, `provenance`, `manuscript_benchmarks`.
+- **Transformation**: a run-level vector becomes an inference record against one deterministic model.
+- **Research role**: implements the Section 4.2 significance claims and Table 3's dispersion row.
+- **Equations**: with $c$ the Lasso baseline and $s$ the sample standard deviation:
+
+$$
+t=\frac{\bar R^2-c}{s/\sqrt{M}},\qquad s^2=\frac{1}{M-1}\sum_{m=1}^{M}\left(R^2_m-\bar R^2\right)^2,\qquad \min_m R^2_m>c.
+$$
+
+- **Implementation distinction**: defaults 0.6313, 1671.6 and 0.039 are manuscript benchmarks and are labelled as such. `all_checks_passed` requires a one-sided $p<0.05$ and a strict minimum excess; the audit separates reproduced evidence from constants.
+
+### Task 33 — `run_task_33`
+
+- **Inputs**: `run_oos_r2`, `run_coefficient_vectors`, `run_feature_names`, `subset_matrix`, `reference_coefficients`, `relative_tolerance`, `output_dir`; keyword `training_subset_matrix`.
+- **Process**: selects the best run by argmax, audits its coefficients against Table 4 over the union of keys, renders the lower-triangular heatmap, and groups coefficients into the three mechanisms.
+- **Outputs**: `exemplar`, `audit`, `correlation`, `mechanisms`, `mechanisms_complete`, `incomplete_mechanisms`, `coefficient_units`, `coefficients_standardized`, `exemplar_audit_path`, `disclosure`.
+- **Transformation**: run results become one disclosed exemplar with economic labels.
+- **Research role**: implements Section 4.4's reading of volatility spread construction, credit-spread drag and factor-exposure smoothing.
+- **Equations**: the audit compares scaled coefficients, with $s_j$ the training standard deviation of feature $j$:
+
+$$
+\tilde c_j=c_j\,s_j,\qquad \frac{|\tilde c_j-\beta_j^{\mathrm{T4}}|}{|\beta_j^{\mathrm{T4}}|}\le\delta.
+$$
+
+- **Implementation distinction**: every table carries the post-hoc best-draw disclosure, so the exemplar is never a headline result. The exemplar remains the argmax run even if it omits canonical features; such omissions are reported, because choosing on them would select on the outcome.
+
+### Task 34 — `run_task_34`
+
+- **Inputs**: `raw_inputs`, `config`, `configuration_name`; optional `mode`; keyword `seed`, `use_walk_forward_fold`, `audit_log_path`, `output_dir`, `run_index`, `enable_tuning`, `ensemble_runs`, `baseline_cv`, `run_baselines`, `strict_reporting`, `allow_missing_calendar_oracle`, `policy_norm_bound`, `prepared`.
+- **Process**: in `full` mode, runs preparation (Tasks 1–8), the search (Tasks 9–23), configuration, baselines, optional tuning, ensemble, evaluation, inference and interpretability, logging each stage. In `smoke` mode, runs only preparation and search under a reduced budget.
+- **Outputs**: `search_artifact`, `coefficients`, `validation_r2_trajectory`, `run_diagnostics`, `oos_r2`, `oos_dispersion`, plus `mode`, `single_run_oos_r2`, `selected_features`, `subset_sizes`, `stage_log`, `information_barrier`, the stage records, `reporting_failures`, `prepared`.
+- **Transformation**: four raw panels and one configuration name become the complete, audited study output.
+- **Research role**: this is the top-level orchestrator of the Figure 1 framework.
+- **Equations**: the preflight bound on rollouts, and the barrier that every searched date must satisfy:
+
+$$
+N_{\max}=I_1 I_2 I_3,\qquad \lbrace\text{searched dates}\rbrace\cap\lbrace\text{test dates}\rbrace=\varnothing.
+$$
+
+- **Implementation distinction**: the barrier is checked before any test evaluation in both modes, and smoke mode ($I_1=I_2=I_3=1$) never evaluates the test block. Failures in reporting stages 32 and 33 are logged unless `strict_reporting` is set.
+
+### Task 35 — `run_task_35`
+
+- **Inputs**: `run_pipeline`, `base_config`, `out_dir`; keyword `pipeline_context`.
+- **Process**: validates the frozen vector, resolves the pipeline, hashes the configuration, runs the seed, $K_{\min}$ and window sweeps on deep copies, and writes the combined audit.
+- **Outputs**: `seed_robustness`, `kmin_sensitivity`, `window_sensitivity`, `audit_path`.
+- **Transformation**: one frozen configuration becomes three sensitivity records, each from complete pipeline executions.
+- **Research role**: probes quantities the paper leaves open ($K_{\min}$ and the correlation window) and run-to-run seed variability, with no re-tuning.
+- **Equations**: seeds $\lbrace42,\dots,46\rbrace$, $K_{\min}\in\lbrace1,5,10,15\rbrace$, three window conventions, and the pairwise set similarity:
+
+$$
+J(S_a,S_b)=\frac{|S_a\cap S_b|}{|S_a\cup S_b|}.
+$$
+
+- **Implementation distinction**: a SHA-256 fingerprint before and after proves the caller's configuration is unchanged. Learning rates 0.177 and 2.212 are validated, so a re-tuned configuration is rejected. Manuscript dispersion and timing figures are never returned as results.
+
+### Task 36 — `run_task_36`
+
+- **Inputs**: `manuscript_table1`, `reproduced_table1`, `manuscript_table2`, `reproduced_table2`, `search_spaces`, `cv_trials`, `audit`, `output_dir`; optional `barrier_rerun_inputs`.
+- **Process**: compares seven Table 1 rows and twelve Table 2 parameters, audits half-open test intersections, verifies the information barrier, and writes the report's thirteen artifacts.
+- **Outputs**: `table1`, `table2`, `leakage`, `report`, `stages`, `overall_pass`.
+- **Transformation**: reproduced tables and audits become one verdict against the paper's targets.
+- **Research role**: enforces the Section 4.1 claim that the test window is untouched by both search and tuning.
+- **Equations**: the leakage verdict requires empty intersections and a clean barrier, with search domain $\mathcal{D}_S$, tuning domain $\mathcal{D}_O$ and test window $\mathcal{D}_T$:
+
+$$
+\mathcal{D}_S\cap\mathcal{D}_T=\varnothing,\qquad \mathcal{D}_O\cap\mathcal{D}_T=\varnothing.
+$$
+
+- **Implementation distinction**: the barrier gets its own verdict, re-run from `barrier_rerun_inputs` when supplied and otherwise re-verified from the recorded payload. A report whose executive summary misstates the comparisons raises `ValueError`.
